@@ -313,7 +313,7 @@ func (s *BadgerStore) Close() error {
 // buildKey 构建存储 key
 func (s *BadgerStore) buildKey(entry *model.LogEntry) []byte {
 	// 格式: service:timestamp_nano:id
-	ts := entry.Timestamp.UnixNano()
+	ts := entry.Timestamp.Time().UnixNano()
 	return []byte(fmt.Sprintf("%s:%020d:%s", entry.Service, ts, entry.ID))
 }
 

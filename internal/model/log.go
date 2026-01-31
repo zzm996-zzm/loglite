@@ -1,17 +1,71 @@
 package model
 
 import (
+	"strings"
 	"time"
 )
+
+// JSONTime 自定义时间类型，用于 JSON 序列化
+type JSONTime time.Time
+
+// MarshalJSON 序列化为友好格式
+func (t JSONTime) MarshalJSON() ([]byte, error) {
+	stamp := time.Time(t).Format("2006-01-02 15:04:05")
+	return []byte(`"` + stamp + `"`), nil
+}
+
+// UnmarshalJSON 反序列化，支持多种格式
+func (t *JSONTime) UnmarshalJSON(data []byte) error {
+	s := strings.Trim(string(data), `"`)
+	if s == "" || s == "null" {
+		*t = JSONTime(time.Time{})
+		return nil
+	}
+
+	// 支持多种格式
+	formats := []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04:05.999999999Z07:00",
+		time.RFC3339,
+		time.RFC3339Nano,
+	}
+
+	for _, format := range formats {
+		if parsed, err := time.ParseInLocation(format, s, time.Local); err == nil {
+			*t = JSONTime(parsed)
+			return nil
+		}
+	}
+
+	// 默认尝试
+	parsed, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		*t = JSONTime(time.Now())
+		return nil
+	}
+	*t = JSONTime(parsed)
+	return nil
+}
+
+// Time 转换为 time.Time
+func (t JSONTime) Time() time.Time {
+	return time.Time(t)
+}
+
+// IsZero 检查是否为零值
+func (t JSONTime) IsZero() bool {
+	return time.Time(t).IsZero()
+}
 
 // LogEntry 日志条目
 type LogEntry struct {
 	// 必填字段
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	Message   string    `json:"message"`
-	Level     string    `json:"level"`
-	Service   string    `json:"service"`
+	ID        string   `json:"id"`
+	Timestamp JSONTime `json:"timestamp"`
+	Message   string   `json:"message"`
+	Level     string   `json:"level"`
+	Service   string   `json:"service"`
 
 	// 推荐字段
 	TraceID   string `json:"trace_id,omitempty"`
@@ -67,7 +121,7 @@ func (e *LogEntry) Validate() error {
 		e.Level = "info"
 	}
 	if e.Timestamp.IsZero() {
-		e.Timestamp = time.Now()
+		e.Timestamp = JSONTime(time.Now())
 	}
 	return nil
 }

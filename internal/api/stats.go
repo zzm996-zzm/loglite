@@ -107,7 +107,7 @@ func (h *StatsHandler) GetErrorStats(c *gin.Context) {
 			groups[key] = &ErrorGroup{
 				Key:         key,
 				Count:       0,
-				LastSeen:    log.Timestamp,
+				LastSeen:    log.Timestamp.Time().Format("2006-01-02 15:04:05"),
 				SampleError: log.Message,
 				Package:     log.Package,
 			}
@@ -115,8 +115,9 @@ func (h *StatsHandler) GetErrorStats(c *gin.Context) {
 
 		g := groups[key]
 		g.Count++
-		if log.Timestamp.After(g.LastSeen) {
-			g.LastSeen = log.Timestamp
+		logTime := log.Timestamp.Time().Format("2006-01-02 15:04:05")
+		if logTime > g.LastSeen {
+			g.LastSeen = logTime
 			g.SampleError = log.Message
 		}
 	}
@@ -138,12 +139,12 @@ func (h *StatsHandler) GetErrorStats(c *gin.Context) {
 
 // ErrorGroup 错误分组
 type ErrorGroup struct {
-	Key         string    `json:"key"`
-	Count       int       `json:"count"`
-	Percentage  string    `json:"percentage"`
-	LastSeen    time.Time `json:"last_seen"`
-	SampleError string    `json:"sample_error"`
-	Package     string    `json:"package,omitempty"`
+	Key         string `json:"key"`
+	Count       int    `json:"count"`
+	Percentage  string `json:"percentage"`
+	LastSeen    string `json:"last_seen"`
+	SampleError string `json:"sample_error"`
+	Package     string `json:"package,omitempty"`
 }
 
 // sortAndTopN 排序并取前 N
@@ -242,7 +243,7 @@ func (h *StatsHandler) GetErrorTrend(c *gin.Context) {
 	// 按时间段聚合
 	buckets := make(map[string]int)
 	for _, log := range logs {
-		bucketTime := log.Timestamp.Truncate(intervalDuration)
+		bucketTime := log.Timestamp.Time().Truncate(intervalDuration)
 		key := bucketTime.Format("2006-01-02 15:04")
 		buckets[key]++
 	}
