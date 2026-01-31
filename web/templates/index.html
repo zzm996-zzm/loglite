@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogLite - 轻量级日志平台</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --border-color: #30363d;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+            --accent-red: #f85149;
+            --accent-purple: #a371f7;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 18px;
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-text span {
+            color: var(--accent-blue);
+        }
+
+        .stats-bar {
+            display: flex;
+            gap: 24px;
+            font-size: 13px;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-secondary);
+        }
+
+        .stat-value {
+            color: var(--text-primary);
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Main Layout */
+        .main {
+            display: flex;
+            height: calc(100vh - 69px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .filter-section {
+            margin-bottom: 24px;
+        }
+
+        .filter-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .search-box {
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px 12px 10px 36px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+        }
+
+        /* Level Buttons */
+        .level-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .level-btn {
+            padding: 6px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .level-btn:hover {
+            border-color: var(--text-muted);
+        }
+
+        .level-btn.active {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .level-btn.active[data-level="error"] {
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        .level-btn.active[data-level="warn"] {
+            border-color: var(--accent-yellow);
+            color: var(--accent-yellow);
+        }
+
+        .level-btn.active[data-level="info"] {
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+
+        .level-btn.active[data-level="debug"] {
+            border-color: var(--accent-purple);
+            color: var(--accent-purple);
+        }
+
+        .level-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .level-dot.error { background: var(--accent-red); }
+        .level-dot.warn { background: var(--accent-yellow); }
+        .level-dot.info { background: var(--accent-green); }
+        .level-dot.debug { background: var(--accent-purple); }
+
+        /* Service Select */
+        .service-select {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        /* Time Range */
+        .time-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .time-btn {
+            padding: 6px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .time-btn:hover {
+            border-color: var(--text-muted);
+        }
+
+        .time-btn.active {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: white;
+        }
+
+        /* Content Area */
+        .content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Toolbar */
+        .toolbar {
+            padding: 12px 20px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .result-count {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .result-count strong {
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .toolbar-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-primary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .btn-primary {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #4393e6;
+        }
+
+        /* Log List */
+        .log-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        .log-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+
+        .log-item:hover {
+            border-color: var(--text-muted);
+        }
+
+        .log-header {
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+        }
+
+        .log-level {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .log-level.error {
+            background: rgba(248, 81, 73, 0.15);
+            color: var(--accent-red);
+        }
+
+        .log-level.warn {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--accent-yellow);
+        }
+
+        .log-level.info {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+        }
+
+        .log-level.debug {
+            background: rgba(163, 113, 247, 0.15);
+            color: var(--accent-purple);
+        }
+
+        .log-time {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .log-service {
+            font-size: 12px;
+            color: var(--accent-blue);
+            background: rgba(88, 166, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .log-message {
+            flex: 1;
+            font-size: 14px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .log-expand {
+            color: var(--text-muted);
+            transition: transform 0.2s;
+        }
+
+        .log-item.expanded .log-expand {
+            transform: rotate(180deg);
+        }
+
+        .log-details {
+            display: none;
+            padding: 0 16px 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .log-item.expanded .log-details {
+            display: block;
+        }
+
+        .log-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .meta-item {
+            font-size: 13px;
+        }
+
+        .meta-label {
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .meta-value {
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            word-break: break-all;
+        }
+
+        .log-json {
+            margin-top: 16px;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            padding: 16px;
+            overflow-x: auto;
+        }
+
+        .log-json pre {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        /* Empty State */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-text {
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        .empty-hint {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        /* Loading */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+            .stats-bar {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">L</div>
+            <div class="logo-text">Log<span>Lite</span></div>
+        </div>
+        <div class="stats-bar">
+            <div class="stat-item">
+                <span>总日志数</span>
+                <span class="stat-value" id="total-logs">-</span>
+            </div>
+            <div class="stat-item">
+                <span>存储大小</span>
+                <span class="stat-value" id="storage-size">-</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="main">
+        <aside class="sidebar">
+            <div class="filter-section">
+                <div class="filter-title">搜索</div>
+                <div class="search-box">
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    <input type="text" class="search-input" id="search-input" placeholder="搜索日志内容...">
+                </div>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-title">日志级别</div>
+                <div class="level-buttons">
+                    <button class="level-btn active" data-level="">
+                        全部
+                    </button>
+                    <button class="level-btn" data-level="error">
+                        <span class="level-dot error"></span>
+                        Error
+                    </button>
+                    <button class="level-btn" data-level="warn">
+                        <span class="level-dot warn"></span>
+                        Warn
+                    </button>
+                    <button class="level-btn" data-level="info">
+                        <span class="level-dot info"></span>
+                        Info
+                    </button>
+                    <button class="level-btn" data-level="debug">
+                        <span class="level-dot debug"></span>
+                        Debug
+                    </button>
+                </div>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-title">服务</div>
+                <select class="service-select" id="service-select">
+                    <option value="">全部服务</option>
+                </select>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-title">时间范围</div>
+                <div class="time-buttons">
+                    <button class="time-btn active" data-range="1h">1小时</button>
+                    <button class="time-btn" data-range="6h">6小时</button>
+                    <button class="time-btn" data-range="24h">24小时</button>
+                    <button class="time-btn" data-range="7d">7天</button>
+                </div>
+            </div>
+        </aside>
+
+        <div class="content">
+            <div class="toolbar">
+                <div class="result-count">
+                    找到 <strong id="result-count">0</strong> 条日志
+                </div>
+                <div class="toolbar-actions">
+                    <button class="btn" onclick="refreshLogs()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                            <path d="M3 3v5h5"></path>
+                            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+                            <path d="M16 16h5v5"></path>
+                        </svg>
+                        刷新
+                    </button>
+                </div>
+            </div>
+
+            <div class="log-list" id="log-list">
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 状态
+        let currentLevel = '';
+        let currentService = '';
+        let currentTimeRange = '1h';
+        let currentKeyword = '';
+        let services = new Set();
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            loadLogs();
+            setupEventListeners();
+            
+            // 自动刷新
+            setInterval(loadStats, 30000);
+        });
+
+        // 设置事件监听
+        function setupEventListeners() {
+            // 级别筛选
+            document.querySelectorAll('.level-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.level-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentLevel = btn.dataset.level;
+                    loadLogs();
+                });
+            });
+
+            // 时间范围
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentTimeRange = btn.dataset.range;
+                    loadLogs();
+                });
+            });
+
+            // 服务筛选
+            document.getElementById('service-select').addEventListener('change', (e) => {
+                currentService = e.target.value;
+                loadLogs();
+            });
+
+            // 搜索
+            let searchTimeout;
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    currentKeyword = e.target.value;
+                    loadLogs();
+                }, 300);
+            });
+        }
+
+        // 加载统计信息
+        async function loadStats() {
+            try {
+                const res = await fetch('/api/v1/stats');
+                const data = await res.json();
+                if (data.code === 200) {
+                    document.getElementById('total-logs').textContent = formatNumber(data.data.total_logs);
+                    document.getElementById('storage-size').textContent = formatBytes(data.data.storage_size);
+                }
+            } catch (e) {
+                console.error('加载统计失败:', e);
+            }
+        }
+
+        // 加载日志
+        async function loadLogs() {
+            const logList = document.getElementById('log-list');
+            logList.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+            try {
+                const params = new URLSearchParams();
+                if (currentLevel) params.append('level', currentLevel);
+                if (currentService) params.append('service', currentService);
+                if (currentKeyword) params.append('q', currentKeyword);
+                
+                // 计算时间范围
+                const now = new Date();
+                let start = new Date();
+                switch (currentTimeRange) {
+                    case '1h': start.setHours(now.getHours() - 1); break;
+                    case '6h': start.setHours(now.getHours() - 6); break;
+                    case '24h': start.setDate(now.getDate() - 1); break;
+                    case '7d': start.setDate(now.getDate() - 7); break;
+                }
+                params.append('start', start.toISOString());
+                params.append('end', now.toISOString());
+                params.append('limit', '100');
+
+                const res = await fetch('/api/v1/query?' + params.toString());
+                const data = await res.json();
+
+                if (data.code === 200) {
+                    document.getElementById('result-count').textContent = data.data.total;
+                    
+                    // 更新服务列表
+                    data.data.logs.forEach(log => services.add(log.service));
+                    updateServiceSelect();
+                    
+                    renderLogs(data.data.logs);
+                }
+            } catch (e) {
+                console.error('加载日志失败:', e);
+                logList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">⚠️</div>
+                        <div class="empty-text">加载失败</div>
+                        <div class="empty-hint">${e.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        // 渲染日志
+        function renderLogs(logs) {
+            const logList = document.getElementById('log-list');
+            
+            if (!logs || logs.length === 0) {
+                logList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📭</div>
+                        <div class="empty-text">暂无日志</div>
+                        <div class="empty-hint">试试调整筛选条件或发送一些日志</div>
+                    </div>
+                `;
+                return;
+            }
+
+            logList.innerHTML = logs.map(log => `
+                <div class="log-item" onclick="toggleLog(this)">
+                    <div class="log-header">
+                        <span class="log-level ${log.level}">${log.level}</span>
+                        <span class="log-time">${formatTime(log.timestamp)}</span>
+                        <span class="log-service">${log.service}</span>
+                        <span class="log-message">${escapeHtml(log.message)}</span>
+                        <svg class="log-expand" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6,9 12,15 18,9"></polyline>
+                        </svg>
+                    </div>
+                    <div class="log-details">
+                        <div class="log-meta">
+                            ${log.trace_id ? `<div class="meta-item"><div class="meta-label">Trace ID</div><div class="meta-value">${log.trace_id}</div></div>` : ''}
+                            ${log.request_id ? `<div class="meta-item"><div class="meta-label">Request ID</div><div class="meta-value">${log.request_id}</div></div>` : ''}
+                            ${log.user_id ? `<div class="meta-item"><div class="meta-label">User ID</div><div class="meta-value">${log.user_id}</div></div>` : ''}
+                            ${log.ip ? `<div class="meta-item"><div class="meta-label">IP</div><div class="meta-value">${log.ip}</div></div>` : ''}
+                            ${log.caller ? `<div class="meta-item"><div class="meta-label">Caller</div><div class="meta-value">${log.caller}</div></div>` : ''}
+                            ${log.function ? `<div class="meta-item"><div class="meta-label">Function</div><div class="meta-value">${log.function}</div></div>` : ''}
+                        </div>
+                        <div class="log-json">
+                            <pre>${JSON.stringify(log, null, 2)}</pre>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 切换日志展开
+        function toggleLog(element) {
+            element.classList.toggle('expanded');
+        }
+
+        // 刷新日志
+        function refreshLogs() {
+            loadStats();
+            loadLogs();
+        }
+
+        // 更新服务选择器
+        function updateServiceSelect() {
+            const select = document.getElementById('service-select');
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">全部服务</option>';
+            services.forEach(service => {
+                select.innerHTML += `<option value="${service}" ${service === currentValue ? 'selected' : ''}>${service}</option>`;
+            });
+        }
+
+        // 工具函数
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleString('zh-CN', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
+        function formatBytes(bytes) {
+            if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
+            if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+            if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return bytes + ' B';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

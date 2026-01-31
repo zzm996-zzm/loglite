@@ -1,0 +1,16 @@
+# LogLite 配置文件
+server:
+  port: 8082
+  host: "0.0.0.0"
+
+storage:
+  data_dir: "./data"
+  max_size: 10GB
+  retention: 168h  # 7 days
+
+query:
+  default_limit: 100
+  max_limit: 1000
+
+log:
+  level: info
