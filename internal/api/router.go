@@ -48,6 +48,7 @@ func SetupRouter(store *storage.BadgerStore) *gin.Engine {
 
 	// Web UI (静态文件)
 	r.GET("/", serveIndex)
+	r.GET("/errors", serveErrors)
 	r.Static("/static", "./web/static")
 
 	return r
@@ -78,4 +79,10 @@ func corsMiddleware() gin.HandlerFunc {
 func serveIndex(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.File("./web/templates/index.html")
+}
+
+// serveErrors 提供错误分析页面
+func serveErrors(c *gin.Context) {
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.File("./web/templates/errors.html")
 }

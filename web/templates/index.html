@@ -47,10 +47,18 @@
             z-index: 100;
         }
 
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
         .logo {
             display: flex;
             align-items: center;
             gap: 12px;
+            text-decoration: none;
+            color: var(--text-primary);
         }
 
         .logo-icon {
@@ -73,6 +81,30 @@
 
         .logo-text span {
             color: var(--accent-blue);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 8px;
+        }
+
+        .nav-link {
+            padding: 8px 16px;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .nav-link:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .nav-link.active {
+            background: var(--accent-blue);
+            color: white;
         }
 
         .stats-bar {
@@ -528,9 +560,15 @@
 </head>
 <body>
     <header class="header">
-        <div class="logo">
-            <div class="logo-icon">L</div>
-            <div class="logo-text">Log<span>Lite</span></div>
+        <div class="header-left">
+            <a href="/" class="logo">
+                <div class="logo-icon">L</div>
+                <div class="logo-text">Log<span>Lite</span></div>
+            </a>
+            <nav class="nav-links">
+                <a href="/" class="nav-link active">日志查看</a>
+                <a href="/errors" class="nav-link">错误分析</a>
+            </nav>
         </div>
         <div class="stats-bar">
             <div class="stat-item">

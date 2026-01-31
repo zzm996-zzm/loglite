@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>错误分析 - LogLite</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --bg-card: #1c2128;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --border-color: #30363d;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+            --accent-red: #f85149;
+            --accent-purple: #a371f7;
+            --accent-orange: #db6d28;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent-red), var(--accent-orange));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 18px;
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 8px;
+        }
+
+        .nav-link {
+            padding: 8px 16px;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .nav-link:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .nav-link.active {
+            background: var(--accent-red);
+            color: white;
+        }
+
+        .time-selector {
+            display: flex;
+            gap: 8px;
+        }
+
+        .time-btn {
+            padding: 6px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .time-btn:hover {
+            border-color: var(--text-muted);
+        }
+
+        .time-btn.active {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: white;
+        }
+
+        /* Main Content */
+        .main {
+            padding: 24px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .stat-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .stat-card-title {
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-card-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .stat-card-icon.error {
+            background: rgba(248, 81, 73, 0.15);
+            color: var(--accent-red);
+        }
+
+        .stat-card-icon.warn {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--accent-yellow);
+        }
+
+        .stat-card-icon.rate {
+            background: rgba(163, 113, 247, 0.15);
+            color: var(--accent-purple);
+        }
+
+        .stat-card-icon.func {
+            background: rgba(88, 166, 255, 0.15);
+            color: var(--accent-blue);
+        }
+
+        .stat-card-value {
+            font-size: 32px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+            margin-bottom: 4px;
+        }
+
+        .stat-card-change {
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat-card-change.up {
+            color: var(--accent-red);
+        }
+
+        .stat-card-change.down {
+            color: var(--accent-green);
+        }
+
+        /* Charts Section */
+        .charts-section {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .chart-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .chart-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .chart-card-title {
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+
+        /* Top Errors Table */
+        .table-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .table-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .table-card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .table-card-title {
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        .table-wrapper {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px 20px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 500;
+            background: var(--bg-tertiary);
+            position: sticky;
+            top: 0;
+        }
+
+        td {
+            font-size: 14px;
+        }
+
+        tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .rank {
+            width: 40px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+        }
+
+        .rank-1 { color: var(--accent-red); font-weight: 600; }
+        .rank-2 { color: var(--accent-orange); font-weight: 600; }
+        .rank-3 { color: var(--accent-yellow); font-weight: 600; }
+
+        .func-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            color: var(--accent-blue);
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .error-count {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+        }
+
+        .percentage {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .last-seen {
+            color: var(--text-muted);
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .sample-error {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .service-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--accent-blue);
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        /* Loading */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 60px;
+            color: var(--text-muted);
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .charts-section {
+                grid-template-columns: 1fr;
+            }
+            .table-section {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            .nav-links {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <a href="/" class="logo">
+                <div class="logo-icon">E</div>
+                <div class="logo-text">错误分析</div>
+            </a>
+            <nav class="nav-links">
+                <a href="/" class="nav-link">日志查看</a>
+                <a href="/errors" class="nav-link active">错误分析</a>
+            </nav>
+        </div>
+        <div class="time-selector">
+            <button class="time-btn active" data-range="1h">1小时</button>
+            <button class="time-btn" data-range="6h">6小时</button>
+            <button class="time-btn" data-range="24h">24小时</button>
+            <button class="time-btn" data-range="7d">7天</button>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-card-header">
+                    <span class="stat-card-title">错误总数</span>
+                    <div class="stat-card-icon error">🔴</div>
+                </div>
+                <div class="stat-card-value" id="total-errors">-</div>
+                <div class="stat-card-change" id="error-change">
+                    <span>加载中...</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-header">
+                    <span class="stat-card-title">警告总数</span>
+                    <div class="stat-card-icon warn">🟡</div>
+                </div>
+                <div class="stat-card-value" id="total-warns">-</div>
+                <div class="stat-card-change" id="warn-change">
+                    <span>加载中...</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-header">
+                    <span class="stat-card-title">错误率</span>
+                    <div class="stat-card-icon rate">📊</div>
+                </div>
+                <div class="stat-card-value" id="error-rate">-</div>
+                <div class="stat-card-change">
+                    <span style="color: var(--text-muted)">错误/总日志</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-header">
+                    <span class="stat-card-title">受影响函数</span>
+                    <div class="stat-card-icon func">⚡</div>
+                </div>
+                <div class="stat-card-value" id="affected-funcs">-</div>
+                <div class="stat-card-change">
+                    <span style="color: var(--text-muted)">不同的报错函数</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-section">
+            <div class="chart-card">
+                <div class="chart-card-header">
+                    <span class="chart-card-title">📈 错误趋势</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <div class="chart-card-header">
+                    <span class="chart-card-title">🍩 按服务分布</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="serviceChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tables -->
+        <div class="table-section">
+            <div class="table-card">
+                <div class="table-card-header">
+                    <span class="table-card-title">🏆 Top 报错函数</span>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="rank">#</th>
+                                <th>函数名</th>
+                                <th>错误数</th>
+                                <th>占比</th>
+                                <th>最后出现</th>
+                            </tr>
+                        </thead>
+                        <tbody id="top-functions">
+                            <tr><td colspan="5" class="loading"><div class="spinner"></div>加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="table-card">
+                <div class="table-card-header">
+                    <span class="table-card-title">📋 最新错误</span>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>服务</th>
+                                <th>错误信息</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-errors">
+                            <tr><td colspan="3" class="loading"><div class="spinner"></div>加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let currentTimeRange = '1h';
+        let trendChart = null;
+        let serviceChart = null;
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            loadAllData();
+            setupEventListeners();
+            
+            // 自动刷新
+            setInterval(loadAllData, 30000);
+        });
+
+        function setupEventListeners() {
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentTimeRange = btn.dataset.range;
+                    loadAllData();
+                });
+            });
+        }
+
+        function initCharts() {
+            // 趋势图
+            const trendCtx = document.getElementById('trendChart').getContext('2d');
+            trendChart = new Chart(trendCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '错误数',
+                        data: [],
+                        borderColor: '#f85149',
+                        backgroundColor: 'rgba(248, 81, 73, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 6,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: '#30363d' },
+                            ticks: { color: '#8b949e' }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#30363d' },
+                            ticks: { color: '#8b949e' }
+                        }
+                    }
+                }
+            });
+
+            // 服务分布图
+            const serviceCtx = document.getElementById('serviceChart').getContext('2d');
+            serviceChart = new Chart(serviceCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: [
+                            '#f85149',
+                            '#d29922',
+                            '#58a6ff',
+                            '#a371f7',
+                            '#3fb950',
+                            '#db6d28',
+                        ],
+                        borderWidth: 0,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: '#e6edf3' }
+                        }
+                    }
+                }
+            });
+        }
+
+        async function loadAllData() {
+            await Promise.all([
+                loadStats(),
+                loadTrend(),
+                loadTopFunctions(),
+                loadServiceDistribution(),
+                loadRecentErrors()
+            ]);
+        }
+
+        async function loadStats() {
+            try {
+                // 错误统计
+                const errorRes = await fetch(`/api/v1/stats/errors?time_range=${currentTimeRange}`);
+                const errorData = await errorRes.json();
+                
+                if (errorData.code === 200) {
+                    document.getElementById('total-errors').textContent = formatNumber(errorData.data.total_errors);
+                    document.getElementById('affected-funcs').textContent = errorData.data.groups?.length || 0;
+                }
+
+                // 总日志数（用于计算错误率）
+                const now = new Date();
+                let start = new Date();
+                switch (currentTimeRange) {
+                    case '1h': start.setHours(now.getHours() - 1); break;
+                    case '6h': start.setHours(now.getHours() - 6); break;
+                    case '24h': start.setDate(now.getDate() - 1); break;
+                    case '7d': start.setDate(now.getDate() - 7); break;
+                }
+
+                const totalRes = await fetch(`/api/v1/query?start=${start.toISOString()}&limit=1`);
+                const totalData = await totalRes.json();
+                const totalLogs = totalData.data?.total || 0;
+
+                // 警告统计
+                const warnRes = await fetch(`/api/v1/query?level=warn&start=${start.toISOString()}&limit=1`);
+                const warnData = await warnRes.json();
+                document.getElementById('total-warns').textContent = formatNumber(warnData.data?.total || 0);
+
+                // 错误率
+                const errorCount = errorData.data?.total_errors || 0;
+                const errorRate = totalLogs > 0 ? (errorCount / totalLogs * 100).toFixed(2) : 0;
+                document.getElementById('error-rate').textContent = errorRate + '%';
+
+            } catch (e) {
+                console.error('加载统计失败:', e);
+            }
+        }
+
+        async function loadTrend() {
+            try {
+                let interval = '5m';
+                if (currentTimeRange === '24h') interval = '1h';
+                if (currentTimeRange === '7d') interval = '6h';
+
+                const res = await fetch(`/api/v1/stats/errors/trend?time_range=${currentTimeRange}&interval=${interval}`);
+                const data = await res.json();
+
+                if (data.code === 200 && data.data.trend) {
+                    const labels = data.data.trend.map(t => {
+                        const time = t.time.split(' ')[1] || t.time;
+                        return time.substring(0, 5);
+                    });
+                    const values = data.data.trend.map(t => t.count);
+
+                    trendChart.data.labels = labels;
+                    trendChart.data.datasets[0].data = values;
+                    trendChart.update();
+                }
+            } catch (e) {
+                console.error('加载趋势失败:', e);
+            }
+        }
+
+        async function loadTopFunctions() {
+            try {
+                const res = await fetch(`/api/v1/stats/errors?group_by=function&time_range=${currentTimeRange}&top=10`);
+                const data = await res.json();
+
+                const tbody = document.getElementById('top-functions');
+                
+                if (data.code === 200 && data.data.groups?.length > 0) {
+                    tbody.innerHTML = data.data.groups.map((g, i) => `
+                        <tr>
+                            <td class="rank rank-${i + 1}">${i + 1}</td>
+                            <td class="func-name" title="${g.key}">${g.key}</td>
+                            <td class="error-count">${g.count}</td>
+                            <td class="percentage">${g.percentage}</td>
+                            <td class="last-seen">${formatTime(g.last_seen)}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:40px;">暂无数据</td></tr>';
+                }
+            } catch (e) {
+                console.error('加载函数统计失败:', e);
+            }
+        }
+
+        async function loadServiceDistribution() {
+            try {
+                const res = await fetch(`/api/v1/stats/errors?group_by=service&time_range=${currentTimeRange}&top=6`);
+                const data = await res.json();
+
+                if (data.code === 200 && data.data.groups?.length > 0) {
+                    serviceChart.data.labels = data.data.groups.map(g => g.key);
+                    serviceChart.data.datasets[0].data = data.data.groups.map(g => g.count);
+                    serviceChart.update();
+                }
+            } catch (e) {
+                console.error('加载服务分布失败:', e);
+            }
+        }
+
+        async function loadRecentErrors() {
+            try {
+                const now = new Date();
+                let start = new Date();
+                switch (currentTimeRange) {
+                    case '1h': start.setHours(now.getHours() - 1); break;
+                    case '6h': start.setHours(now.getHours() - 6); break;
+                    case '24h': start.setDate(now.getDate() - 1); break;
+                    case '7d': start.setDate(now.getDate() - 7); break;
+                }
+
+                const res = await fetch(`/api/v1/query?level=error&start=${start.toISOString()}&limit=20`);
+                const data = await res.json();
+
+                const tbody = document.getElementById('recent-errors');
+                
+                if (data.code === 200 && data.data.logs?.length > 0) {
+                    tbody.innerHTML = data.data.logs.map(log => `
+                        <tr>
+                            <td class="last-seen">${formatTime(log.timestamp)}</td>
+                            <td><span class="service-tag">${log.service}</span></td>
+                            <td class="sample-error" title="${escapeHtml(log.message)}">${escapeHtml(log.message)}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:40px;">暂无错误</td></tr>';
+                }
+            } catch (e) {
+                console.error('加载最新错误失败:', e);
+            }
+        }
+
+        // 工具函数
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hour = String(date.getHours()).padStart(2, '0');
+            const minute = String(date.getMinutes()).padStart(2, '0');
+            return `${month}-${day} ${hour}:${minute}`;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
