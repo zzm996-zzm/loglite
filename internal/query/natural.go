@@ -32,7 +32,12 @@ func (p *NaturalQueryParser) Parse(query string) storage.QueryParams {
 	params.Service = p.parseService(query)
 
 	// 剩余部分作为关键词
-	params.Keyword = p.extractKeyword(query)
+	keyword := p.extractKeyword(query)
+	// 如果关键词太短（小于2个字符），认为是噪音，忽略
+	// 如果关键词和服务名相同，也忽略
+	if len([]rune(keyword)) >= 2 && keyword != params.Service {
+		params.Keyword = keyword
+	}
 
 	return params
 }
@@ -218,18 +223,24 @@ func (p *NaturalQueryParser) parseService(query string) string {
 
 // extractKeyword 提取关键词
 func (p *NaturalQueryParser) extractKeyword(query string) string {
-	// 移除已解析的时间词
-	timeWords := []string{
-		"最近", "分钟", "小时", "天", "今天", "昨天", "本周", "上周",
-		"这个月", "本月", "上午", "下午", "晚上", "内",
-	}
 	result := query
+
+	// 移除已解析的时间词（注意顺序：长词先处理，避免误删）
+	timeWords := []string{
+		"今天上午", "今天下午", "今天晚上",
+		"这个月", "一小时内", "半小时内",
+		"5分钟内", "10分钟内", "30分钟内", "1小时内",
+		"今天", "昨天", "本周", "上周", "本月",
+		"上午", "下午", "晚上",
+		"最近", "分钟", "小时", "天", "内",
+	}
 	for _, word := range timeWords {
 		result = strings.ReplaceAll(result, word, "")
 	}
 
 	// 移除级别词
 	levelWords := []string{
+		"错误日志", "警告日志", "信息日志", "调试日志",
 		"错误", "error", "报错", "异常", "失败",
 		"警告", "warn", "告警",
 		"信息", "info",
@@ -239,10 +250,21 @@ func (p *NaturalQueryParser) extractKeyword(query string) string {
 		result = strings.ReplaceAll(result, word, "")
 	}
 
-	// 移除 "的" "日志" 等
-	fillerWords := []string{"的", "日志", "log", "logs", "服务"}
+	// 移除 "的" "日志" 等填充词
+	fillerWords := []string{"的", "日志", "log", "logs", "服务", "所有", "全部", "查询", "查看", "显示"}
 	for _, word := range fillerWords {
 		result = strings.ReplaceAll(result, word, "")
+	}
+
+	// 移除服务名模式
+	servicePatterns := []string{
+		`(\w+[-_]?\w*)服务`,
+		`服务[=:：]?(\w+[-_]?\w*)`,
+		`service[=:：]?(\w+[-_]?\w*)`,
+	}
+	for _, pattern := range servicePatterns {
+		re := regexp.MustCompile(pattern)
+		result = re.ReplaceAllString(result, "")
 	}
 
 	// 清理数字和空白

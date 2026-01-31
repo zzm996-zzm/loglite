@@ -147,6 +147,10 @@ func (h *Handler) QueryLogs(c *gin.Context) {
 		// 自然语言查询
 		parser := query.NewNaturalQueryParser()
 		params = parser.Parse(q)
+		// 自然语言查询的服务名使用模糊匹配
+		if params.Service != "" {
+			params.ServiceFuzzy = true
+		}
 		// 如果解析后没有关键词，保留原始查询
 		if params.Keyword == "" && params.Level == "" && params.Service == "" {
 			params.Keyword = q
@@ -198,15 +202,29 @@ func (h *Handler) QueryLogs(c *gin.Context) {
 		return
 	}
 
+	// 构建响应（包含解析后的查询参数，方便调试）
+	response := gin.H{
+		"logs":   logs,
+		"total":  total,
+		"limit":  params.Limit,
+		"offset": params.Offset,
+	}
+
+	// 如果是自然语言查询，返回解析结果
+	if c.Query("debug") == "1" || c.Query("debug") == "true" {
+		response["parsed"] = gin.H{
+			"level":      params.Level,
+			"service":    params.Service,
+			"keyword":    params.Keyword,
+			"start_time": params.StartTime.Format("2006-01-02 15:04:05"),
+			"end_time":   params.EndTime.Format("2006-01-02 15:04:05"),
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"code":    200,
 		"message": "success",
-		"data": gin.H{
-			"logs":   logs,
-			"total":  total,
-			"limit":  params.Limit,
-			"offset": params.Offset,
-		},
+		"data":    response,
 	})
 }
 

@@ -102,13 +102,14 @@ func (s *BadgerStore) SaveBatch(entries []*model.LogEntry) error {
 
 // QueryParams 查询参数
 type QueryParams struct {
-	Service   string
-	Level     string
-	StartTime time.Time
-	EndTime   time.Time
-	Keyword   string
-	Limit     int
-	Offset    int
+	Service      string
+	ServiceFuzzy bool // 服务名模糊匹配
+	Level        string
+	StartTime    time.Time
+	EndTime      time.Time
+	Keyword      string
+	Limit        int
+	Offset       int
 }
 
 // Query 查询日志
@@ -125,9 +126,9 @@ func (s *BadgerStore) Query(params QueryParams) ([]*model.LogEntry, int, error) 
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		// 构建前缀
+		// 构建前缀（仅精确匹配时使用）
 		var prefix []byte
-		if params.Service != "" {
+		if params.Service != "" && !params.ServiceFuzzy {
 			prefix = []byte(params.Service + ":")
 		}
 
@@ -144,7 +145,7 @@ func (s *BadgerStore) Query(params QueryParams) ([]*model.LogEntry, int, error) 
 			item := it.Item()
 			key := item.Key()
 
-			// 检查前缀
+			// 检查前缀（仅精确匹配）
 			if len(prefix) > 0 && !hasPrefix(key, prefix) {
 				break
 			}
@@ -152,7 +153,12 @@ func (s *BadgerStore) Query(params QueryParams) ([]*model.LogEntry, int, error) 
 			// 解析时间
 			entryTime := s.parseTimeFromKey(key)
 			if !params.StartTime.IsZero() && entryTime.Before(params.StartTime) {
-				break
+				// 模糊匹配时不能 break，因为不是按服务分组的
+				if len(prefix) > 0 {
+					break
+				}
+				it.Next()
+				continue
 			}
 			if !params.EndTime.IsZero() && entryTime.After(params.EndTime) {
 				it.Next()
@@ -169,14 +175,29 @@ func (s *BadgerStore) Query(params QueryParams) ([]*model.LogEntry, int, error) 
 				continue
 			}
 
+			// 服务名过滤（模糊匹配）
+			if params.Service != "" && params.ServiceFuzzy {
+				if !strings.Contains(strings.ToLower(entry.Service), strings.ToLower(params.Service)) {
+					it.Next()
+					continue
+				}
+			}
+
 			// 过滤条件
 			if params.Level != "" && entry.Level != params.Level {
 				it.Next()
 				continue
 			}
-			if params.Keyword != "" && !strings.Contains(strings.ToLower(entry.Message), strings.ToLower(params.Keyword)) {
-				it.Next()
-				continue
+			// 关键词搜索（同时匹配消息和服务名）
+			if params.Keyword != "" {
+				keyword := strings.ToLower(params.Keyword)
+				messageMatch := strings.Contains(strings.ToLower(entry.Message), keyword)
+				serviceMatch := strings.Contains(strings.ToLower(entry.Service), keyword)
+				functionMatch := strings.Contains(strings.ToLower(entry.Function), keyword)
+				if !messageMatch && !serviceMatch && !functionMatch {
+					it.Next()
+					continue
+				}
 			}
 
 			total++
