@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/loglite/loglite/internal/model"
+	"github.com/loglite/loglite/internal/query"
 	"github.com/loglite/loglite/internal/storage"
 )
 
@@ -59,6 +60,11 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 			"error":   err.Error(),
 		})
 		return
+	}
+
+	// 广播到实时流
+	if hub := GetTailHub(); hub != nil {
+		hub.Broadcast(&entry)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -114,6 +120,13 @@ func (h *Handler) ReceiveBatch(c *gin.Context) {
 		return
 	}
 
+	// 广播到实时流
+	if hub := GetTailHub(); hub != nil {
+		for _, entry := range req.Logs {
+			hub.Broadcast(entry)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"code":    200,
 		"message": "success",
@@ -126,18 +139,33 @@ func (h *Handler) ReceiveBatch(c *gin.Context) {
 // QueryLogs 查询日志
 // GET /api/v1/query
 func (h *Handler) QueryLogs(c *gin.Context) {
-	params := storage.QueryParams{
-		Service: c.Query("service"),
-		Level:   c.Query("level"),
-		Keyword: c.Query("q"),
-	}
+	var params storage.QueryParams
 
-	// 解析时间范围（支持多种格式）
-	if start := c.Query("start"); start != "" {
-		params.StartTime = parseTime(start)
-	}
-	if end := c.Query("end"); end != "" {
-		params.EndTime = parseTime(end)
+	// 检查是否是自然语言查询
+	q := c.Query("q")
+	if q != "" && c.Query("service") == "" && c.Query("level") == "" && c.Query("start") == "" {
+		// 自然语言查询
+		parser := query.NewNaturalQueryParser()
+		params = parser.Parse(q)
+		// 如果解析后没有关键词，保留原始查询
+		if params.Keyword == "" && params.Level == "" && params.Service == "" {
+			params.Keyword = q
+		}
+	} else {
+		// 结构化查询
+		params = storage.QueryParams{
+			Service: c.Query("service"),
+			Level:   c.Query("level"),
+			Keyword: q,
+		}
+
+		// 解析时间范围（支持多种格式）
+		if start := c.Query("start"); start != "" {
+			params.StartTime = parseTime(start)
+		}
+		if end := c.Query("end"); end != "" {
+			params.EndTime = parseTime(end)
+		}
 	}
 
 	// 解析分页

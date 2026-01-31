@@ -5,6 +5,9 @@ import (
 	"github.com/loglite/loglite/internal/storage"
 )
 
+// TailHub 全局实例
+var globalTailHub *TailHub
+
 // SetupRouter 设置路由
 func SetupRouter(store *storage.BadgerStore) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
@@ -14,6 +17,11 @@ func SetupRouter(store *storage.BadgerStore) *gin.Engine {
 	r.Use(corsMiddleware())
 
 	handler := NewHandler(store)
+	statsHandler := NewStatsHandler(store)
+
+	// 初始化 TailHub
+	globalTailHub = NewTailHub()
+	tailHandler := NewTailHandler(globalTailHub)
 
 	// 健康检查
 	r.GET("/health", handler.Health)
@@ -25,12 +33,17 @@ func SetupRouter(store *storage.BadgerStore) *gin.Engine {
 		v1.POST("/logs", handler.ReceiveLog)
 		v1.POST("/logs/batch", handler.ReceiveBatch)
 
-		// 日志查询
+		// 日志查询（支持自然语言）
 		v1.GET("/query", handler.QueryLogs)
 		v1.GET("/logs/:id", handler.GetLog)
 
+		// 实时日志流
+		v1.GET("/tail", tailHandler.HandleTail)
+
 		// 统计
 		v1.GET("/stats", handler.GetStats)
+		v1.GET("/stats/errors", statsHandler.GetErrorStats)
+		v1.GET("/stats/errors/trend", statsHandler.GetErrorTrend)
 	}
 
 	// Web UI (静态文件)
@@ -38,6 +51,11 @@ func SetupRouter(store *storage.BadgerStore) *gin.Engine {
 	r.Static("/static", "./web/static")
 
 	return r
+}
+
+// GetTailHub 获取 TailHub 实例（用于广播日志）
+func GetTailHub() *TailHub {
+	return globalTailHub
 }
 
 // corsMiddleware CORS 中间件
