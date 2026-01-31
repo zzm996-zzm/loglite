@@ -132,16 +132,12 @@ func (h *Handler) QueryLogs(c *gin.Context) {
 		Keyword: c.Query("q"),
 	}
 
-	// 解析时间范围
+	// 解析时间范围（支持多种格式）
 	if start := c.Query("start"); start != "" {
-		if t, err := time.Parse(time.RFC3339, start); err == nil {
-			params.StartTime = t
-		}
+		params.StartTime = parseTime(start)
 	}
 	if end := c.Query("end"); end != "" {
-		if t, err := time.Parse(time.RFC3339, end); err == nil {
-			params.EndTime = t
-		}
+		params.EndTime = parseTime(end)
 	}
 
 	// 解析分页
@@ -239,6 +235,31 @@ func (h *Handler) GetStats(c *gin.Context) {
 func (h *Handler) Health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok",
-		"time":   time.Now().Format(time.RFC3339),
+		"time":   time.Now().Format("2006-01-02 15:04:05"),
 	})
+}
+
+// parseTime 解析多种时间格式
+func parseTime(s string) time.Time {
+	// 支持的时间格式
+	formats := []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+		"2006-01-02",
+		"2006-1-2 15:04:05",
+		"2006-1-2 15:04",
+		"2006-1-2",
+		"2006/01/02 15:04:05",
+		"2006/01/02",
+		"2006/1/2",
+		time.RFC3339,
+	}
+
+	for _, format := range formats {
+		if t, err := time.ParseInLocation(format, s, time.Local); err == nil {
+			return t
+		}
+	}
+
+	return time.Time{}
 }

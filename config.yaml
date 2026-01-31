@@ -1,7 +1,7 @@
 # LogLite 配置文件
 server:
   port: 8082
-  host: "0.0.0.0"
+  host: "0.0.0.0"`
 
 storage:
   data_dir: "./data"
