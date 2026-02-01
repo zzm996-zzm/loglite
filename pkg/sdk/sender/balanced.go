@@ -175,8 +175,12 @@ func NewBalancedSender(cfg Config) *BalancedSender {
 
 // Send 发送日志
 func (s *BalancedSender) Send(entry *LogEntry) error {
+	// 深拷贝 entry，避免数据竞争
+	// 原因：LogEntry 的 Metadata 是 map（引用类型），浅拷贝会导致底层数据共享
+	entryCopy := s.copyEntry(entry)
+
 	// 写入双缓冲
-	isFull := s.doubleBuffer.Write(*entry)
+	isFull := s.doubleBuffer.Write(entryCopy)
 
 	// 如果满了，触发 swap
 	if isFull {
@@ -188,6 +192,37 @@ func (s *BalancedSender) Send(entry *LogEntry) error {
 	}
 
 	return nil
+}
+
+// copyEntry 深拷贝 LogEntry（避免与调用方的 sync.Pool 冲突）
+func (s *BalancedSender) copyEntry(entry *LogEntry) LogEntry {
+	copied := LogEntry{
+		ID:         entry.ID,
+		Timestamp:  entry.Timestamp,
+		Message:    entry.Message,
+		Level:      entry.Level,
+		Service:    entry.Service,
+		TraceID:    entry.TraceID,
+		SpanID:     entry.SpanID,
+		UserID:     entry.UserID,
+		RequestID:  entry.RequestID,
+		IP:         entry.IP,
+		Caller:     entry.Caller,
+		Function:   entry.Function,
+		Package:    entry.Package,
+		StackTrace: entry.StackTrace,
+		StackHash:  entry.StackHash,
+		ReceivedAt: entry.ReceivedAt,
+		StoredAt:   entry.StoredAt,
+		Metadata:   make(map[string]interface{}, len(entry.Metadata)),
+	}
+
+	// 深拷贝 Metadata
+	for k, v := range entry.Metadata {
+		copied.Metadata[k] = v
+	}
+
+	return copied
 }
 
 // backgroundLoop 后台发送循环

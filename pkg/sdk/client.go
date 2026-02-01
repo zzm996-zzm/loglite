@@ -347,10 +347,18 @@ var logEntryPool = sync.Pool{
 // 获取LogEntry（从池中或新建）
 func GetLogEntry() *sender.LogEntry {
 	entry := logEntryPool.Get().(*sender.LogEntry)
+
 	// 重置时间字段（time.Time是值类型，会重置为零值）
 	entry.Timestamp = time.Time{}
 	entry.ReceivedAt = time.Time{}
 	entry.StoredAt = time.Time{}
+
+	// 确保 Metadata 是一个干净的空 map
+	// 如果清理失败或为 nil，重新创建以避免脏数据
+	if entry.Metadata == nil || len(entry.Metadata) > 0 {
+		entry.Metadata = make(map[string]interface{}, 8)
+	}
+
 	return entry
 }
 

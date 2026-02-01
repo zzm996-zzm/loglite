@@ -101,6 +101,11 @@ func NewBestEffortSender(cfg Config) *BestEffortSender {
 // writePos=8, commitPos=5, readPos=3
 // 表示：位置 3,4 可读，位置 5,6,7 正在写入，位置 8 可抢占
 func (s *BestEffortSender) Send(entry *LogEntry) error {
+	// 深拷贝 entry，避免数据竞争
+	// 原因：调用方可能在 Send 返回后立即复用 entry（通过 sync.Pool）
+	// 但 ring buffer 中的 entry 需要被后台 goroutine 异步处理
+	entryCopy := s.copyEntry(entry)
+
 	for {
 		// 1. 读取当前指针
 		writePos := atomic.LoadInt64(&s.writePos)
@@ -116,9 +121,9 @@ func (s *BestEffortSender) Send(entry *LogEntry) error {
 		// 如果 writePos 还是原来的值，就 +1 抢占这个位置
 		// 如果失败说明被其他 goroutine 抢走了，重试
 		if atomic.CompareAndSwapInt64(&s.writePos, writePos, writePos+1) {
-			// 4. 抢占成功！写入数据
+			// 4. 抢占成功！写入数据（使用拷贝的 entry）
 			idx := writePos & s.mask
-			s.buffer[idx] = entry
+			s.buffer[idx] = entryCopy
 
 			// 5. 等待前面的写入都完成，然后提交
 			// commitPos 必须顺序递增，保证读取时数据连续
@@ -134,6 +139,37 @@ func (s *BestEffortSender) Send(entry *LogEntry) error {
 		}
 		// CAS 失败，重试
 	}
+}
+
+// copyEntry 深拷贝 LogEntry（避免与调用方的 sync.Pool 冲突）
+func (s *BestEffortSender) copyEntry(entry *LogEntry) *LogEntry {
+	copied := &LogEntry{
+		ID:         entry.ID,
+		Timestamp:  entry.Timestamp,
+		Message:    entry.Message,
+		Level:      entry.Level,
+		Service:    entry.Service,
+		TraceID:    entry.TraceID,
+		SpanID:     entry.SpanID,
+		UserID:     entry.UserID,
+		RequestID:  entry.RequestID,
+		IP:         entry.IP,
+		Caller:     entry.Caller,
+		Function:   entry.Function,
+		Package:    entry.Package,
+		StackTrace: entry.StackTrace,
+		StackHash:  entry.StackHash,
+		ReceivedAt: entry.ReceivedAt,
+		StoredAt:   entry.StoredAt,
+		Metadata:   make(map[string]interface{}, len(entry.Metadata)),
+	}
+
+	// 拷贝 Metadata
+	for k, v := range entry.Metadata {
+		copied.Metadata[k] = v
+	}
+
+	return copied
 }
 
 // backgroundLoop 后台发送循环
