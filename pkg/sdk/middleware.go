@@ -9,55 +9,69 @@ import (
 )
 
 // HTTPMiddleware 标准 HTTP 中间件
+// 需要先设置 defaultLogger: sdk.SetDefaultLogger(logger)
 func HTTPMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+	return HTTPMiddlewareWithLogger(nil)(next)
+}
 
-		// 生成或提取 trace_id
-		traceID := r.Header.Get("X-Trace-ID")
-		if traceID == "" {
-			traceID = uuid.New().String()
-		}
+// HTTPMiddlewareWithLogger 使用指定 Logger 的 HTTP 中间件
+func HTTPMiddlewareWithLogger(logger *Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
 
-		// 生成 request_id
-		requestID := uuid.New().String()
+			// 使用指定的 logger 或 defaultLogger
+			l := logger
+			if l == nil {
+				l = defaultLogger
+			}
 
-		// 注入 context
-		ctx := r.Context()
-		ctx = context.WithValue(ctx, TraceIDKey, traceID)
-		ctx = context.WithValue(ctx, RequestIDKey, requestID)
+			// 生成或提取 trace_id
+			traceID := r.Header.Get("X-Trace-ID")
+			if traceID == "" {
+				traceID = uuid.New().String()
+			}
 
-		// 创建 Logger 并注入
-		if defaultClient != nil {
-			logger := defaultClient.WithContext(ctx)
-			ctx = ToContext(ctx, logger)
-		}
+			// 生成 request_id
+			requestID := uuid.New().String()
 
-		// 设置响应头
-		w.Header().Set("X-Trace-ID", traceID)
-		w.Header().Set("X-Request-ID", requestID)
+			// 注入 context
+			ctx := r.Context()
+			ctx = context.WithValue(ctx, TraceIDKey, traceID)
+			ctx = context.WithValue(ctx, RequestIDKey, requestID)
 
-		// 包装 ResponseWriter 以获取状态码
-		wrapped := &responseWriter{ResponseWriter: w, statusCode: 200}
+			// 创建 Logger 并注入
+			if l != nil {
+				ctxLogger := l.WithContext(ctx)
+				ctx = ToContext(ctx, ctxLogger)
+			}
 
-		// 执行请求
-		next.ServeHTTP(wrapped, r.WithContext(ctx))
+			// 设置响应头
+			w.Header().Set("X-Trace-ID", traceID)
+			w.Header().Set("X-Request-ID", requestID)
 
-		// 记录请求日志
-		if defaultClient != nil {
-			latency := time.Since(start)
-			defaultClient.Info("HTTP Request",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"status", wrapped.statusCode,
-				"latency_ms", latency.Milliseconds(),
-				"client_ip", getClientIP(r),
-				"user_agent", r.UserAgent(),
-				"trace_id", traceID,
-				"request_id", requestID,
-			)
-		}
-	})
+			// 包装 ResponseWriter 以获取状态码
+			wrapped := &responseWriter{ResponseWriter: w, statusCode: 200}
+
+			// 执行请求
+			next.ServeHTTP(wrapped, r.WithContext(ctx))
+
+			// 记录请求日志
+			if l != nil {
+				latency := time.Since(start)
+				l.Info("HTTP Request",
+					"method", r.Method,
+					"path", r.URL.Path,
+					"status", wrapped.statusCode,
+					"latency_ms", latency.Milliseconds(),
+					"client_ip", getClientIP(r),
+					"user_agent", r.UserAgent(),
+					"trace_id", traceID,
+					"request_id", requestID,
+				)
+			}
+		})
+	}
 }
 
 // responseWriter 包装 ResponseWriter
@@ -85,24 +99,45 @@ func getClientIP(r *http.Request) string {
 
 // RecoveryMiddleware Panic 恢复中间件
 func RecoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				// 记录 panic
-				if defaultClient != nil {
-					logger := FromContext(r.Context())
-					logger.Error("Panic recovered",
-						"error", err,
-						"method", r.Method,
-						"path", r.URL.Path,
-					)
+	return RecoveryMiddlewareWithLogger(nil)(next)
+}
+
+// RecoveryMiddlewareWithLogger 使用指定 Logger 的 Panic 恢复中间件
+func RecoveryMiddlewareWithLogger(logger *Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if err := recover(); err != nil {
+					// 使用指定的 logger 或 defaultLogger
+					l := logger
+					if l == nil {
+						l = defaultLogger
+					}
+
+					// 记录 panic
+					if l != nil {
+						ctxLogger := FromContext(r.Context())
+						if ctxLogger != nil {
+							ctxLogger.Error("Panic recovered",
+								"error", err,
+								"method", r.Method,
+								"path", r.URL.Path,
+							)
+						} else {
+							l.Error("Panic recovered",
+								"error", err,
+								"method", r.Method,
+								"path", r.URL.Path,
+							)
+						}
+					}
+
+					// 返回 500
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				}
+			}()
 
-				// 返回 500
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			}
-		}()
-
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }

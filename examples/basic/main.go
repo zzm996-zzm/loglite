@@ -1,67 +1,61 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/loglite/loglite/pkg/sdk"
+	"github.com/loglite/loglite/pkg/sdk/sender"
 )
 
 func main() {
-	// 初始化 LogLite 客户端
-	client := sdk.Init("demo-service",
-		sdk.WithEndpoint("http://localhost:8080"),
-		sdk.WithBatchSize(50),
-		sdk.WithFlushInterval(100*time.Millisecond),
-		sdk.WithCaller(true),
-		sdk.WithStackTrace(true),
+	// ============================================================
+	// LogLite SDK 使用示例（OpenTelemetry 风格）
+	// ============================================================
+
+	// 1. 创建 LoggerProvider（重量级，只创建一次）
+	provider := sdk.NewLoggerProvider(
+		sdk.WithEndpoint("http://localhost:8081"),
+		sdk.WithReliability(sender.Balanced),
 	)
-	defer client.Close()
+	defer provider.Shutdown()
 
-	// 设置为默认客户端（可选）
-	sdk.SetDefault(client)
+	// 2. 获取 Logger（轻量级，可创建多个，共享 Provider）
+	userLogger := provider.Logger("user-service")
+	paymentLogger := provider.Logger("payment-service")
+	orderLogger := provider.Logger("order-service")
 
-	// 基本使用
-	client.Info("应用启动", "version", "1.0.0", "env", "development")
-	client.Debug("调试信息", "config", map[string]string{"db": "localhost"})
-	client.Warn("警告信息", "memory_usage", "85%")
-	client.Error("错误信息", "error", "connection timeout", "retry", 3)
+	// 3. 使用
+	userLogger.Info("用户登录", "user_id", 12345, "ip", "192.168.1.1")
+	paymentLogger.Info("支付成功", "order_id", "ORD-001", "amount", 99.99)
+	orderLogger.Info("订单创建", "order_id", "ORD-001", "items", 3)
 
-	// 使用 With 添加固定字段
-	userLogger := client.With(map[string]interface{}{
-		"user_id": "user-123",
-		"role":    "admin",
-	})
-	userLogger.Info("用户操作", "action", "login")
-	userLogger.Info("用户操作", "action", "view_dashboard")
+	// ============================================================
+	// 场景：不同业务需要不同可靠性
+	// ============================================================
 
-	// 模拟业务场景
-	for i := 0; i < 10; i++ {
-		processOrder(client, fmt.Sprintf("ORD-%d", i+1))
-	}
+	// 关键业务使用 Reliable 模式
+	criticalProvider := sdk.NewLoggerProvider(
+		sdk.WithEndpoint("http://localhost:8081"),
+		sdk.WithReliability(sender.Reliable),
+		sdk.WithWALDir("./logs/critical-wal"),
+	)
+	defer criticalProvider.Shutdown()
+
+	auditLogger := criticalProvider.Logger("audit-service")
+	transactionLogger := criticalProvider.Logger("transaction-service")
+
+	auditLogger.Info("用户权限变更", "user_id", 12345, "role", "admin")
+	transactionLogger.Info("资金转账", "from", "A", "to", "B", "amount", 10000)
+
+	// ============================================================
+	// With：添加固定字段
+	// ============================================================
+
+	orderModuleLogger := orderLogger.With("module", "order", "version", "2.0")
+	orderModuleLogger.Info("订单处理开始")
+	orderModuleLogger.Warn("库存不足", "product_id", "PROD-001")
+	orderModuleLogger.Error("订单创建失败", "error", "db connection timeout")
 
 	// 等待日志发送完成
-	fmt.Println("日志已发送，请在 Web UI 查看: http://localhost:8080")
-}
-
-func processOrder(client *sdk.Client, orderID string) {
-	logger := client.With(map[string]interface{}{
-		"order_id": orderID,
-	})
-
-	logger.Info("开始处理订单")
-
-	// 模拟处理
-	time.Sleep(10 * time.Millisecond)
-
-	// 随机产生一些警告和错误
-	if orderID == "ORD-3" {
-		logger.Warn("订单处理警告", "reason", "库存不足")
-	}
-	if orderID == "ORD-7" {
-		logger.Error("订单处理失败", "error", "支付超时")
-		return
-	}
-
-	logger.Info("订单处理完成", "latency_ms", 10)
+	time.Sleep(500 * time.Millisecond)
 }

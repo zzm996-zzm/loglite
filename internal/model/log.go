@@ -84,8 +84,9 @@ type LogEntry struct {
 	// 任意字段
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
-	// 系统字段
-	ReceivedAt time.Time `json:"-"`
+	// 系统字段（内部使用，不序列化）
+	ReceivedAt time.Time `json:"-"` // 接收时间
+	StoredAt   time.Time `json:"-"` // 存储时间
 }
 
 // LogLevel 日志级别

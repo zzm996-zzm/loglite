@@ -1,205 +1,375 @@
 package sdk
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"os"
-	"path/filepath"
-	"runtime"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/loglite/loglite/pkg/sdk/sender"
 )
 
-// LogEntry 日志条目
-type LogEntry struct {
-	ID         string                 `json:"id"`
-	Timestamp  time.Time              `json:"timestamp"`
-	Message    string                 `json:"message"`
-	Level      string                 `json:"level"`
-	Service    string                 `json:"service"`
-	TraceID    string                 `json:"trace_id,omitempty"`
-	SpanID     string                 `json:"span_id,omitempty"`
-	UserID     string                 `json:"user_id,omitempty"`
-	RequestID  string                 `json:"request_id,omitempty"`
-	IP         string                 `json:"ip,omitempty"`
-	Caller     string                 `json:"caller,omitempty"`
-	Function   string                 `json:"function,omitempty"`
-	Package    string                 `json:"package,omitempty"`
-	StackTrace string                 `json:"stack_trace,omitempty"`
-	StackHash  string                 `json:"stack_hash,omitempty"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+// ============================================================
+// LoggerProvider - 重量级组件（类似 OpenTelemetry 的 LoggerProvider）
+// 负责：配置、Sender 管理、资源管理
+// 一个应用通常只创建一个 Provider
+// ============================================================
+
+// LoggerProvider 日志提供者（重量级）
+type LoggerProvider struct {
+	sender       sender.Sender // 底层发送器
+	enableCaller bool          // 是否启用调用位置采集
+	enableStack  bool          // 是否启用堆栈采集
+	callerDepth  int           // 调用栈深度
 }
 
-// Client LogLite 客户端
-type Client struct {
-	endpoint      string
-	service       string
-	httpClient    *http.Client
-	buffer        chan *LogEntry
-	batchSize     int
-	flushInterval time.Duration
-	callerDepth   int
-	enableCaller  bool
-	enableStack   bool
-	wg            sync.WaitGroup
-	closed        bool
-	mu            sync.RWMutex
+// ProviderOption Provider 配置选项
+type ProviderOption func(*providerBuilder)
 
-	// 可靠性相关
-	fallbackFile string
-	fallbackMu   sync.Mutex
+// providerBuilder Provider 构建器
+type providerBuilder struct {
+	senderConfig sender.Config
+	enableCaller bool
+	enableStack  bool
+	customSender sender.Sender
 }
 
-// Option 客户端选项
-type Option func(*Client)
+// ============================================================
+// Provider 配置选项
+// ============================================================
 
 // WithEndpoint 设置服务端地址
-func WithEndpoint(endpoint string) Option {
-	return func(c *Client) {
-		c.endpoint = endpoint
+func WithEndpoint(endpoint string) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.Endpoint = endpoint
+	}
+}
+
+// WithReliability 设置可靠性级别
+func WithReliability(level sender.Reliability) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.Reliability = level
+	}
+}
+
+// WithSender 自定义 Sender（高级用法）
+func WithSender(s sender.Sender) ProviderOption {
+	return func(b *providerBuilder) {
+		b.customSender = s
 	}
 }
 
 // WithBatchSize 设置批量大小
-func WithBatchSize(size int) Option {
-	return func(c *Client) {
-		c.batchSize = size
+func WithBatchSize(size int) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.BatchSize = size
 	}
 }
 
 // WithFlushInterval 设置刷新间隔
-func WithFlushInterval(d time.Duration) Option {
-	return func(c *Client) {
-		c.flushInterval = d
+func WithFlushInterval(d time.Duration) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.FlushInterval = d
 	}
 }
 
-// WithCaller 启用调用位置采集
-func WithCaller(enable bool) Option {
-	return func(c *Client) {
-		c.enableCaller = enable
-	}
-}
-
-// WithStackTrace 启用堆栈采集（仅 error 级别）
-func WithStackTrace(enable bool) Option {
-	return func(c *Client) {
-		c.enableStack = enable
-	}
-}
-
-// WithFallbackFile 设置降级文件
-func WithFallbackFile(path string) Option {
-	return func(c *Client) {
-		c.fallbackFile = path
+// WithBufferSize 设置缓冲区大小
+func WithBufferSize(size int) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.BufferSize = size
 	}
 }
 
 // WithHTTPTimeout 设置 HTTP 超时
-func WithHTTPTimeout(d time.Duration) Option {
-	return func(c *Client) {
-		c.httpClient.Timeout = d
+func WithHTTPTimeout(d time.Duration) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.Timeout = d
 	}
 }
 
-// Init 初始化客户端
-func Init(service string, opts ...Option) *Client {
-	c := &Client{
-		endpoint:      "http://localhost:8080",
-		service:       service,
-		httpClient:    &http.Client{Timeout: 5 * time.Second},
-		buffer:        make(chan *LogEntry, 10000),
-		batchSize:     100,
-		flushInterval: 100 * time.Millisecond,
-		callerDepth:   3,
-		enableCaller:  true,
-		enableStack:   true,
+// WithFallbackFile 设置降级文件（Balanced 模式）
+func WithFallbackFile(path string) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.FallbackFile = path
+	}
+}
+
+// WithSnapshotDir 设置快照目录（Balanced 模式）
+func WithSnapshotDir(dir string) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.SnapshotDir = dir
+	}
+}
+
+// WithSnapshotInterval 设置快照间隔（Balanced 模式）
+func WithSnapshotInterval(d time.Duration) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.SnapshotInterval = d
+	}
+}
+
+// WithWALDir 设置 WAL 目录（Reliable 模式）
+func WithWALDir(dir string) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.WALDir = dir
+	}
+}
+
+// WithRetry 设置重试配置
+func WithRetry(count int, interval time.Duration) ProviderOption {
+	return func(b *providerBuilder) {
+		b.senderConfig.RetryCount = count
+		b.senderConfig.RetryInterval = interval
+	}
+}
+
+// WithCaller 启用调用位置采集
+func WithCaller(enable bool) ProviderOption {
+	return func(b *providerBuilder) {
+		b.enableCaller = enable
+	}
+}
+
+// WithStackTrace 启用堆栈采集（仅 error 级别）
+func WithStackTrace(enable bool) ProviderOption {
+	return func(b *providerBuilder) {
+		b.enableStack = enable
+	}
+}
+
+// ============================================================
+// Provider 创建和管理
+// ============================================================
+
+// NewLoggerProvider 创建 LoggerProvider（重量级，只创建一次）
+//
+// 使用示例：
+//
+//	provider := sdk.NewLoggerProvider(
+//	    sdk.WithEndpoint("http://loglite:8080"),
+//	    sdk.WithReliability(sender.Reliable),
+//	)
+//	defer provider.Shutdown()
+//
+//	userLogger := provider.Logger("user-service")
+//	paymentLogger := provider.Logger("payment-service")
+func NewLoggerProvider(opts ...ProviderOption) *LoggerProvider {
+	// 默认配置
+	builder := &providerBuilder{
+		senderConfig: sender.Config{
+			Endpoint:         "http://localhost:8080",
+			Reliability:      sender.Balanced,
+			BatchSize:        100,
+			FlushInterval:    100 * time.Millisecond,
+			BufferSize:       10000,
+			Timeout:          5 * time.Second,
+			RetryCount:       3,
+			RetryInterval:    100 * time.Millisecond,
+			SnapshotInterval: 5 * time.Second,
+			SnapshotDir:      "./logs/snapshot",
+			WALDir:           "./logs/wal",
+		},
+		enableCaller: true,
+		enableStack:  true,
 	}
 
+	// 应用选项
 	for _, opt := range opts {
-		opt(c)
+		opt(builder)
 	}
 
-	// 启动后台发送协程
-	c.wg.Add(1)
-	go c.backgroundFlush()
+	// 创建 Provider
+	p := &LoggerProvider{
+		enableCaller: builder.enableCaller,
+		enableStack:  builder.enableStack,
+		callerDepth:  4, // Provider -> Logger -> log -> captureContext
+	}
 
-	return c
+	// 创建 Sender
+	if builder.customSender != nil {
+		p.sender = builder.customSender
+	} else {
+		p.sender = sender.NewSender(builder.senderConfig)
+		if p.sender == nil {
+			fmt.Println("[SDK] Sender init failed, fallback to BestEffort mode")
+			fallbackCfg := builder.senderConfig
+			fallbackCfg.Reliability = sender.BestEffort
+			p.sender = sender.NewBestEffortSender(fallbackCfg)
+		}
+	}
+
+	return p
 }
+
+// Logger 获取指定 service 的 Logger（轻量级，可创建多个）
+//
+// 使用示例：
+//
+//	userLogger := provider.Logger("user-service")
+//	paymentLogger := provider.Logger("payment-service")
+func (p *LoggerProvider) Logger(service string) *Logger {
+	return &Logger{
+		provider: p,
+		service:  service,
+		fields:   make(map[string]interface{}),
+	}
+}
+
+// Shutdown 关闭 Provider（释放资源）
+func (p *LoggerProvider) Shutdown() error {
+	if p.sender != nil {
+		return p.sender.Close()
+	}
+	return nil
+}
+
+// Flush 强制刷新所有缓冲区
+func (p *LoggerProvider) Flush() error {
+	if p.sender != nil {
+		return p.sender.Flush()
+	}
+	return nil
+}
+
+// ============================================================
+// Context Key 定义
+// ============================================================
+
+type contextKey string
+
+const (
+	TraceIDKey   contextKey = "trace_id"
+	RequestIDKey contextKey = "request_id"
+	UserIDKey    contextKey = "user_id"
+	LoggerKey    contextKey = "loglite_logger"
+)
+
+// ============================================================
+// Logger - 轻量级组件（类似 OpenTelemetry 的 Logger）
+// 绑定 service，可以创建很多个
+// ============================================================
+
+// Logger 日志记录器（轻量级）
+type Logger struct {
+	provider *LoggerProvider        // 指向 Provider
+	service  string                 // 服务名
+	fields   map[string]interface{} // 固定字段
+}
+
+// ============================================================
+// Logger 日志方法
+// ============================================================
 
 // Debug 记录 debug 日志
-func (c *Client) Debug(message string, keyvals ...interface{}) {
-	c.log("debug", message, keyvals...)
+func (l *Logger) Debug(message string, keyvals ...interface{}) {
+	l.log("debug", message, keyvals...)
 }
 
 // Info 记录 info 日志
-func (c *Client) Info(message string, keyvals ...interface{}) {
-	c.log("info", message, keyvals...)
+func (l *Logger) Info(message string, keyvals ...interface{}) {
+	l.log("info", message, keyvals...)
 }
 
 // Warn 记录 warn 日志
-func (c *Client) Warn(message string, keyvals ...interface{}) {
-	c.log("warn", message, keyvals...)
+func (l *Logger) Warn(message string, keyvals ...interface{}) {
+	l.log("warn", message, keyvals...)
 }
 
 // Error 记录 error 日志
-func (c *Client) Error(message string, keyvals ...interface{}) {
-	c.log("error", message, keyvals...)
+func (l *Logger) Error(message string, keyvals ...interface{}) {
+	l.log("error", message, keyvals...)
 }
 
-// With 创建带有固定字段的 Logger
-func (c *Client) With(fields map[string]interface{}) *Logger {
+// With 创建带有额外字段的子 Logger
+//
+// 使用示例：
+//
+//	orderLogger := userLogger.With("module", "order", "version", "1.0")
+//	orderLogger.Info("创建订单")
+func (l *Logger) With(keyvals ...interface{}) *Logger {
+	// 复制现有字段
+	newFields := make(map[string]interface{})
+	for k, v := range l.fields {
+		newFields[k] = v
+	}
+
+	// 添加新字段
+	for i := 0; i < len(keyvals)-1; i += 2 {
+		if key, ok := keyvals[i].(string); ok {
+			newFields[key] = keyvals[i+1]
+		}
+	}
+
 	return &Logger{
-		client: c,
-		fields: fields,
+		provider: l.provider,
+		service:  l.service,
+		fields:   newFields,
 	}
 }
 
-// WithContext 从 Context 创建 Logger
-func (c *Client) WithContext(ctx context.Context) *Logger {
-	l := &Logger{
-		client: c,
-		fields: make(map[string]interface{}),
+// WithContext 从 Context 创建子 Logger
+func (l *Logger) WithContext(ctx context.Context) *Logger {
+	newLogger := &Logger{
+		provider: l.provider,
+		service:  l.service,
+		fields:   make(map[string]interface{}),
 	}
 
-	// 从 context 提取常用字段
+	// 复制现有字段
+	for k, v := range l.fields {
+		newLogger.fields[k] = v
+	}
+
+	// 从 context 提取字段
 	if traceID, ok := ctx.Value(TraceIDKey).(string); ok {
-		l.fields["trace_id"] = traceID
+		newLogger.fields["trace_id"] = traceID
 	}
 	if requestID, ok := ctx.Value(RequestIDKey).(string); ok {
-		l.fields["request_id"] = requestID
+		newLogger.fields["request_id"] = requestID
 	}
 	if userID, ok := ctx.Value(UserIDKey).(string); ok {
-		l.fields["user_id"] = userID
+		newLogger.fields["user_id"] = userID
 	}
 
-	return l
+	return newLogger
 }
 
-// log 内部日志方法
-func (c *Client) log(level, message string, keyvals ...interface{}) {
-	c.mu.RLock()
-	if c.closed {
-		c.mu.RUnlock()
-		return
-	}
-	c.mu.RUnlock()
+// ============================================================
+// Logger 内部方法
+// ============================================================
 
-	entry := &LogEntry{
+func (l *Logger) log(level, message string, keyvals ...interface{}) {
+	p := l.provider
+
+	// 1. 构造 LogEntry
+	entry := &sender.LogEntry{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
 		Message:   message,
 		Level:     level,
-		Service:   c.service,
+		Service:   l.service,
 		Metadata:  make(map[string]interface{}),
 	}
 
-	// 解析 keyvals
+	// 2. 添加固定字段
+	for k, v := range l.fields {
+		switch k {
+		case "trace_id":
+			entry.TraceID = fmt.Sprintf("%v", v)
+		case "span_id":
+			entry.SpanID = fmt.Sprintf("%v", v)
+		case "request_id":
+			entry.RequestID = fmt.Sprintf("%v", v)
+		case "user_id":
+			entry.UserID = fmt.Sprintf("%v", v)
+		case "ip":
+			entry.IP = fmt.Sprintf("%v", v)
+		default:
+			entry.Metadata[k] = v
+		}
+	}
+
+	// 3. 解析 keyvals
 	for i := 0; i < len(keyvals)-1; i += 2 {
 		key, ok := keyvals[i].(string)
 		if !ok {
@@ -207,10 +377,11 @@ func (c *Client) log(level, message string, keyvals ...interface{}) {
 		}
 		value := keyvals[i+1]
 
-		// 特殊字段
 		switch key {
 		case "trace_id":
 			entry.TraceID = fmt.Sprintf("%v", value)
+		case "span_id":
+			entry.SpanID = fmt.Sprintf("%v", value)
 		case "request_id":
 			entry.RequestID = fmt.Sprintf("%v", value)
 		case "user_id":
@@ -222,159 +393,76 @@ func (c *Client) log(level, message string, keyvals ...interface{}) {
 		}
 	}
 
-	// 采集调用位置
-	if c.enableCaller {
-		if pc, file, line, ok := runtime.Caller(c.callerDepth); ok {
-			entry.Caller = fmt.Sprintf("%s:%d", filepath.Base(file), line)
-			if fn := runtime.FuncForPC(pc); fn != nil {
-				entry.Function = filepath.Base(fn.Name())
-			}
+	// 4. 自动采集调用上下文
+	if p.enableCaller {
+		if caller := captureContext(p.callerDepth); caller != nil {
+			entry.Caller = fmt.Sprintf("%s:%d", caller.File, caller.Line)
+			entry.Function = caller.Function
+			entry.Package = caller.Package
 		}
 	}
 
-	// error 级别采集堆栈
-	if level == "error" && c.enableStack {
-		buf := make([]byte, 4096)
-		n := runtime.Stack(buf, false)
-		entry.StackTrace = string(buf[:n])
+	// 5. error 级别自动采集堆栈
+	if level == "error" && p.enableStack {
+		entry.StackTrace = captureStack(p.callerDepth)
+		entry.StackHash = hashStack(entry.StackTrace)
 	}
 
-	// 写入缓冲区
-	select {
-	case c.buffer <- entry:
-		// 成功
-	default:
-		// 缓冲区满，写降级文件
-		c.writeFallback(entry)
-	}
-}
-
-// backgroundFlush 后台刷新协程
-func (c *Client) backgroundFlush() {
-	defer c.wg.Done()
-
-	ticker := time.NewTicker(c.flushInterval)
-	defer ticker.Stop()
-
-	batch := make([]*LogEntry, 0, c.batchSize)
-
-	for {
-		select {
-		case entry, ok := <-c.buffer:
-			if !ok {
-				// channel 关闭，发送剩余日志
-				if len(batch) > 0 {
-					c.sendBatch(batch)
-				}
-				return
-			}
-
-			batch = append(batch, entry)
-			if len(batch) >= c.batchSize {
-				c.sendBatch(batch)
-				batch = make([]*LogEntry, 0, c.batchSize)
-			}
-
-		case <-ticker.C:
-			if len(batch) > 0 {
-				c.sendBatch(batch)
-				batch = make([]*LogEntry, 0, c.batchSize)
-			}
-		}
-	}
-}
-
-// sendBatch 批量发送日志
-func (c *Client) sendBatch(entries []*LogEntry) {
-	if len(entries) == 0 {
-		return
-	}
-
-	body, err := json.Marshal(map[string]interface{}{
-		"logs": entries,
-	})
-	if err != nil {
-		c.writeFallbackBatch(entries)
-		return
-	}
-
-	req, err := http.NewRequest("POST", c.endpoint+"/api/v1/logs/batch", bytes.NewReader(body))
-	if err != nil {
-		c.writeFallbackBatch(entries)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		c.writeFallbackBatch(entries)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		c.writeFallbackBatch(entries)
-	}
-}
-
-// writeFallback 写入降级文件
-func (c *Client) writeFallback(entry *LogEntry) {
-	if c.fallbackFile == "" {
-		return
-	}
-
-	c.fallbackMu.Lock()
-	defer c.fallbackMu.Unlock()
-
-	f, err := os.OpenFile(c.fallbackFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	data, _ := json.Marshal(entry)
-	f.Write(data)
-	f.WriteString("\n")
-}
-
-// writeFallbackBatch 批量写入降级文件
-func (c *Client) writeFallbackBatch(entries []*LogEntry) {
-	for _, entry := range entries {
-		c.writeFallback(entry)
-	}
-}
-
-// Close 关闭客户端
-func (c *Client) Close() error {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return nil
-	}
-	c.closed = true
-	c.mu.Unlock()
-
-	// 关闭 buffer，触发 backgroundFlush 退出
-	close(c.buffer)
-
-	// 等待所有日志发送完成（最多 5 秒）
-	done := make(chan struct{})
-	go func() {
-		c.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return nil
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("close timeout")
-	}
+	// 6. 发送
+	p.sender.Send(entry)
 }
 
 // Flush 强制刷新缓冲区
-func (c *Client) Flush() {
-	// 发送一个同步信号
-	// 简单实现：等待一个刷新周期
-	time.Sleep(c.flushInterval + 10*time.Millisecond)
+func (l *Logger) Flush() error {
+	return l.provider.Flush()
+}
+
+// ============================================================
+// 全局 Provider 和便捷函数
+// ============================================================
+
+var (
+	globalProvider *LoggerProvider
+	defaultLogger  *Logger
+)
+
+// SetGlobalProvider 设置全局 Provider
+func SetGlobalProvider(p *LoggerProvider) {
+	globalProvider = p
+}
+
+// GlobalProvider 获取全局 Provider
+func GlobalProvider() *LoggerProvider {
+	return globalProvider
+}
+
+// Global 获取全局 Logger（需要指定 service）
+func Global(service string) *Logger {
+	if globalProvider == nil {
+		return nil
+	}
+	return globalProvider.Logger(service)
+}
+
+// SetDefaultLogger 设置默认 Logger（用于中间件）
+func SetDefaultLogger(l *Logger) {
+	defaultLogger = l
+}
+
+// DefaultLogger 获取默认 Logger
+func DefaultLogger() *Logger {
+	return defaultLogger
+}
+
+// FromContext 从 Context 获取 Logger
+func FromContext(ctx context.Context) *Logger {
+	if l, ok := ctx.Value(LoggerKey).(*Logger); ok {
+		return l
+	}
+	return nil
+}
+
+// ToContext 将 Logger 存入 Context
+func ToContext(ctx context.Context, l *Logger) context.Context {
+	return context.WithValue(ctx, LoggerKey, l)
 }

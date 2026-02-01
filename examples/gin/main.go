@@ -9,21 +9,32 @@ import (
 )
 
 func main() {
-	// 初始化 LogLite 客户端
-	client := sdk.Init("gin-demo",
-		sdk.WithEndpoint("http://localhost:8080"),
-	)
-	defer client.Close()
+	// ============================================================
+	// 🆕 新 API：OpenTelemetry 风格
+	// ============================================================
 
-	// 设置为默认客户端
-	sdk.SetDefault(client)
+	// 1. 创建 LoggerProvider
+	provider := sdk.NewLoggerProvider(
+		sdk.WithEndpoint("http://localhost:8081"),
+	)
+	defer provider.Shutdown()
+
+	// 2. 获取 Logger
+	logger := provider.Logger("gin-demo")
+
+	// 3. 设置为默认 Logger（用于中间件）
+	sdk.SetDefaultLogger(logger)
 
 	// 创建 Gin 引擎
 	r := gin.New()
 
 	// 使用 LogLite 中间件
-	r.Use(sdk.GinMiddleware())  // 请求日志
-	r.Use(sdk.GinRecovery())    // Panic 恢复
+	r.Use(sdk.GinMiddleware()) // 请求日志
+	r.Use(sdk.GinRecovery())   // Panic 恢复
+
+	// 也可以显式传入 Logger
+	// r.Use(sdk.GinMiddlewareWithLogger(logger))
+	// r.Use(sdk.GinRecoveryWithLogger(logger))
 
 	// 路由
 	r.GET("/", func(c *gin.Context) {
@@ -34,10 +45,12 @@ func main() {
 
 	r.GET("/api/users/:id", func(c *gin.Context) {
 		// 从 context 获取 logger（自动带上 trace_id, request_id）
-		logger := sdk.FromContext(c.Request.Context())
+		ctxLogger := sdk.FromContext(c.Request.Context())
 
 		userID := c.Param("id")
-		logger.Info("查询用户", "user_id", userID)
+		if ctxLogger != nil {
+			ctxLogger.Info("查询用户", "user_id", userID)
+		}
 
 		// 模拟业务逻辑
 		time.Sleep(50 * time.Millisecond)
@@ -49,7 +62,7 @@ func main() {
 	})
 
 	r.POST("/api/orders", func(c *gin.Context) {
-		logger := sdk.FromContext(c.Request.Context())
+		ctxLogger := sdk.FromContext(c.Request.Context())
 
 		var req struct {
 			ProductID string  `json:"product_id"`
@@ -58,22 +71,28 @@ func main() {
 		}
 
 		if err := c.ShouldBindJSON(&req); err != nil {
-			logger.Warn("参数错误", "error", err.Error())
+			if ctxLogger != nil {
+				ctxLogger.Warn("参数错误", "error", err.Error())
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		logger.Info("创建订单",
-			"product_id", req.ProductID,
-			"quantity", req.Quantity,
-			"amount", req.Amount,
-		)
+		if ctxLogger != nil {
+			ctxLogger.Info("创建订单",
+				"product_id", req.ProductID,
+				"quantity", req.Quantity,
+				"amount", req.Amount,
+			)
+		}
 
 		// 模拟订单处理
 		orderID := "ORD-" + time.Now().Format("20060102150405")
 		time.Sleep(100 * time.Millisecond)
 
-		logger.Info("订单创建成功", "order_id", orderID)
+		if ctxLogger != nil {
+			ctxLogger.Info("订单创建成功", "order_id", orderID)
+		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"order_id": orderID,
@@ -87,6 +106,6 @@ func main() {
 	})
 
 	// 启动服务
-	client.Info("Gin 服务启动", "port", 9090)
+	logger.Info("Gin 服务启动", "port", 9090)
 	r.Run(":9090")
 }

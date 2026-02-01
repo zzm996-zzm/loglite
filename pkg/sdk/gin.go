@@ -9,9 +9,21 @@ import (
 )
 
 // GinMiddleware Gin 日志中间件
+// 需要先设置 defaultLogger: sdk.SetDefaultLogger(logger)
 func GinMiddleware() gin.HandlerFunc {
+	return GinMiddlewareWithLogger(nil)
+}
+
+// GinMiddlewareWithLogger 使用指定 Logger 的 Gin 中间件
+func GinMiddlewareWithLogger(logger *Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
+
+		// 使用指定的 logger 或 defaultLogger
+		l := logger
+		if l == nil {
+			l = defaultLogger
+		}
 
 		// 生成或提取 trace_id
 		traceID := c.GetHeader("X-Trace-ID")
@@ -28,9 +40,9 @@ func GinMiddleware() gin.HandlerFunc {
 		ctx = context.WithValue(ctx, RequestIDKey, requestID)
 
 		// 创建 Logger 并注入
-		if defaultClient != nil {
-			logger := defaultClient.WithContext(ctx)
-			ctx = ToContext(ctx, logger)
+		if l != nil {
+			ctxLogger := l.WithContext(ctx)
+			ctx = ToContext(ctx, ctxLogger)
 		}
 
 		c.Request = c.Request.WithContext(ctx)
@@ -43,7 +55,7 @@ func GinMiddleware() gin.HandlerFunc {
 		c.Next()
 
 		// 记录请求日志
-		if defaultClient != nil {
+		if l != nil {
 			latency := time.Since(start)
 			status := c.Writer.Status()
 
@@ -54,37 +66,83 @@ func GinMiddleware() gin.HandlerFunc {
 				level = "warn"
 			}
 
-			defaultClient.log(level, "HTTP Request",
-				"method", c.Request.Method,
-				"path", c.Request.URL.Path,
-				"query", c.Request.URL.RawQuery,
-				"status", status,
-				"latency_ms", latency.Milliseconds(),
-				"client_ip", c.ClientIP(),
-				"user_agent", c.Request.UserAgent(),
-				"trace_id", traceID,
-				"request_id", requestID,
-			)
+			switch level {
+			case "info":
+				l.Info("HTTP Request",
+					"method", c.Request.Method,
+					"path", c.Request.URL.Path,
+					"query", c.Request.URL.RawQuery,
+					"status", status,
+					"latency_ms", latency.Milliseconds(),
+					"client_ip", c.ClientIP(),
+					"user_agent", c.Request.UserAgent(),
+					"trace_id", traceID,
+					"request_id", requestID,
+				)
+			case "warn":
+				l.Warn("HTTP Request",
+					"method", c.Request.Method,
+					"path", c.Request.URL.Path,
+					"query", c.Request.URL.RawQuery,
+					"status", status,
+					"latency_ms", latency.Milliseconds(),
+					"client_ip", c.ClientIP(),
+					"user_agent", c.Request.UserAgent(),
+					"trace_id", traceID,
+					"request_id", requestID,
+				)
+			case "error":
+				l.Error("HTTP Request",
+					"method", c.Request.Method,
+					"path", c.Request.URL.Path,
+					"query", c.Request.URL.RawQuery,
+					"status", status,
+					"latency_ms", latency.Milliseconds(),
+					"client_ip", c.ClientIP(),
+					"user_agent", c.Request.UserAgent(),
+					"trace_id", traceID,
+					"request_id", requestID,
+				)
+			}
 		}
 	}
 }
 
 // GinRecovery Gin Panic 恢复中间件
 func GinRecovery() gin.HandlerFunc {
+	return GinRecoveryWithLogger(nil)
+}
+
+// GinRecoveryWithLogger 使用指定 Logger 的 Panic 恢复中间件
+func GinRecoveryWithLogger(logger *Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				// 记录 panic
-				if defaultClient != nil {
-					logger := FromContext(c.Request.Context())
-					logger.Error("Panic recovered",
-						"error", err,
-						"method", c.Request.Method,
-						"path", c.Request.URL.Path,
-					)
+				// 使用指定的 logger 或 defaultLogger
+				l := logger
+				if l == nil {
+					l = defaultLogger
+				}
 
-					// 强制刷新，确保 panic 日志发送
-					defaultClient.Flush()
+				// 记录 panic
+				if l != nil {
+					ctxLogger := FromContext(c.Request.Context())
+					if ctxLogger != nil {
+						ctxLogger.Error("Panic recovered",
+							"error", err,
+							"method", c.Request.Method,
+							"path", c.Request.URL.Path,
+						)
+					} else {
+						l.Error("Panic recovered",
+							"error", err,
+							"method", c.Request.Method,
+							"path", c.Request.URL.Path,
+						)
+					}
+
+					// 强制刷新
+					l.Flush()
 				}
 
 				// 返回 500

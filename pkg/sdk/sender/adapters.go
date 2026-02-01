@@ -29,23 +29,53 @@ import (
 //	    return h.sender.SendRecord(record)
 //	}
 type ZapLogRecord struct {
-	Level    string
-	Time     time.Time
-	Message  string
-	Caller   string
-	Function string
-	Fields   map[string]interface{}
+	Level      string
+	Time       time.Time
+	Message    string
+	Caller     string
+	Function   string
+	Package    string
+	StackTrace string
+	Fields     map[string]interface{}
 }
 
 func (r *ZapLogRecord) ToLogEntry() *LogEntry {
-	return &LogEntry{
-		Timestamp: r.Time,
-		Level:     r.Level,
-		Message:   r.Message,
-		Caller:    r.Caller,
-		Function:  r.Function,
-		Metadata:  r.Fields,
+	entry := &LogEntry{
+		Timestamp:  r.Time,
+		Level:      r.Level,
+		Message:    r.Message,
+		Caller:     r.Caller,
+		Function:   r.Function,
+		Package:    r.Package,
+		StackTrace: r.StackTrace,
+		Metadata:   r.Fields,
 	}
+
+	// 从 Fields 中提取推荐字段
+	if entry.Metadata != nil {
+		if v, ok := entry.Metadata["trace_id"].(string); ok {
+			entry.TraceID = v
+			delete(entry.Metadata, "trace_id")
+		}
+		if v, ok := entry.Metadata["span_id"].(string); ok {
+			entry.SpanID = v
+			delete(entry.Metadata, "span_id")
+		}
+		if v, ok := entry.Metadata["user_id"].(string); ok {
+			entry.UserID = v
+			delete(entry.Metadata, "user_id")
+		}
+		if v, ok := entry.Metadata["request_id"].(string); ok {
+			entry.RequestID = v
+			delete(entry.Metadata, "request_id")
+		}
+		if v, ok := entry.Metadata["ip"].(string); ok {
+			entry.IP = v
+			delete(entry.Metadata, "ip")
+		}
+	}
+
+	return entry
 }
 
 // ZerologRecord zerolog 日志记录适配
@@ -80,10 +110,26 @@ func (r *ZerologRecord) ToLogEntry() *LogEntry {
 		Metadata:  r.Fields,
 	}
 
-	// 从 fields 提取 caller 等
-	if caller, ok := r.Fields["caller"].(string); ok {
-		entry.Caller = caller
-		delete(r.Fields, "caller")
+	// 从 fields 提取标准字段
+	if r.Fields != nil {
+		extractAndDelete := func(key string) string {
+			if v, ok := r.Fields[key].(string); ok {
+				delete(r.Fields, key)
+				return v
+			}
+			return ""
+		}
+
+		entry.TraceID = extractAndDelete("trace_id")
+		entry.SpanID = extractAndDelete("span_id")
+		entry.UserID = extractAndDelete("user_id")
+		entry.RequestID = extractAndDelete("request_id")
+		entry.IP = extractAndDelete("ip")
+		entry.Caller = extractAndDelete("caller")
+		entry.Function = extractAndDelete("function")
+		entry.Package = extractAndDelete("package")
+		entry.StackTrace = extractAndDelete("stack_trace")
+		entry.StackHash = extractAndDelete("stack_hash")
 	}
 
 	return entry
@@ -120,13 +166,36 @@ type SlogRecord struct {
 }
 
 func (r *SlogRecord) ToLogEntry() *LogEntry {
-	return &LogEntry{
+	entry := &LogEntry{
 		Timestamp: r.Time,
 		Level:     r.Level,
 		Message:   r.Message,
 		Caller:    r.Source,
 		Metadata:  r.Fields,
 	}
+
+	// 从 Fields 中提取推荐字段
+	if r.Fields != nil {
+		extractAndDelete := func(key string) string {
+			if v, ok := r.Fields[key].(string); ok {
+				delete(r.Fields, key)
+				return v
+			}
+			return ""
+		}
+
+		entry.TraceID = extractAndDelete("trace_id")
+		entry.SpanID = extractAndDelete("span_id")
+		entry.UserID = extractAndDelete("user_id")
+		entry.RequestID = extractAndDelete("request_id")
+		entry.IP = extractAndDelete("ip")
+		entry.Function = extractAndDelete("function")
+		entry.Package = extractAndDelete("package")
+		entry.StackTrace = extractAndDelete("stack_trace")
+		entry.StackHash = extractAndDelete("stack_hash")
+	}
+
+	return entry
 }
 
 // ============================================================
@@ -194,24 +263,6 @@ func (a *JSONAdapter) AdaptJSON(data map[string]interface{}) *LogEntry {
 		}
 	}
 
-	// Caller 字段
-	for _, key := range []string{"caller", "source", "Caller", "file"} {
-		if v, ok := data[key].(string); ok {
-			entry.Caller = v
-			delete(data, key)
-			break
-		}
-	}
-
-	// Function 字段
-	for _, key := range []string{"function", "func", "Function", "method"} {
-		if v, ok := data[key].(string); ok {
-			entry.Function = v
-			delete(data, key)
-			break
-		}
-	}
-
 	// Service 字段
 	for _, key := range []string{"service", "Service", "app", "application"} {
 		if v, ok := data[key].(string); ok {
@@ -220,6 +271,30 @@ func (a *JSONAdapter) AdaptJSON(data map[string]interface{}) *LogEntry {
 			break
 		}
 	}
+
+	// 推荐字段
+	extractString := func(keys []string, setter func(string)) {
+		for _, key := range keys {
+			if v, ok := data[key].(string); ok {
+				setter(v)
+				delete(data, key)
+				return
+			}
+		}
+	}
+
+	extractString([]string{"trace_id", "traceId", "TraceID"}, func(v string) { entry.TraceID = v })
+	extractString([]string{"span_id", "spanId", "SpanID"}, func(v string) { entry.SpanID = v })
+	extractString([]string{"user_id", "userId", "UserID"}, func(v string) { entry.UserID = v })
+	extractString([]string{"request_id", "requestId", "RequestID"}, func(v string) { entry.RequestID = v })
+	extractString([]string{"ip", "IP", "ipAddress"}, func(v string) { entry.IP = v })
+
+	// 代码位置字段
+	extractString([]string{"caller", "source", "Caller", "file"}, func(v string) { entry.Caller = v })
+	extractString([]string{"function", "func", "Function", "method"}, func(v string) { entry.Function = v })
+	extractString([]string{"package", "pkg", "Package"}, func(v string) { entry.Package = v })
+	extractString([]string{"stack_trace", "stackTrace", "StackTrace", "stack"}, func(v string) { entry.StackTrace = v })
+	extractString([]string{"stack_hash", "stackHash", "StackHash"}, func(v string) { entry.StackHash = v })
 
 	// 剩余字段放入 Metadata
 	for k, v := range data {
