@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 // ============================================================
@@ -134,6 +136,19 @@ func (a *MapAdapter) Adapt(data interface{}) *LogEntry {
 // 方便直接使用
 func (e *LogEntry) ToLogEntry() *LogEntry {
 	return e
+}
+
+// 或者为LogEntry添加Reset方法
+func (e *LogEntry) Reset() {
+	// 使用指针清零，更快
+	*e = LogEntry{
+		// 重用Metadata map
+		Metadata: e.Metadata,
+	}
+	// 清空map
+	for k := range e.Metadata {
+		delete(e.Metadata, k)
+	}
 }
 
 // Reliability 可靠性级别
@@ -307,7 +322,7 @@ func (c *HTTPClient) SendBatch(entries []*LogEntry) error {
 	defer c.mu.Unlock()
 
 	// 1. 序列化请求体
-	body, err := json.Marshal(map[string]interface{}{"logs": entries})
+	body, err := sonic.Marshal(map[string]interface{}{"logs": entries})
 	if err != nil {
 		return fmt.Errorf("marshal logs: %w", err)
 	}

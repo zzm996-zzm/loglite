@@ -3,6 +3,7 @@ package sdk
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/loglite/loglite/pkg/sdk/internal/fastgen"
@@ -334,6 +335,53 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 	return newLogger
 }
 
+var logEntryPool = sync.Pool{
+	New: func() interface{} {
+		return &sender.LogEntry{
+			// 预分配Metadata map，避免后续分配
+			Metadata: make(map[string]interface{}, 8), // 根据实际使用情况调整容量
+		}
+	},
+}
+
+// 获取LogEntry（从池中或新建）
+func GetLogEntry() *sender.LogEntry {
+	entry := logEntryPool.Get().(*sender.LogEntry)
+	// 重置时间字段（time.Time是值类型，会重置为零值）
+	entry.Timestamp = time.Time{}
+	entry.ReceivedAt = time.Time{}
+	entry.StoredAt = time.Time{}
+	return entry
+}
+
+// 归还LogEntry到池中
+func PutLogEntry(entry *sender.LogEntry) {
+	// 重置所有字符串字段（避免内存泄漏）
+	entry.ID = ""
+	entry.Message = ""
+	entry.Level = ""
+	entry.Service = ""
+	entry.TraceID = ""
+	entry.SpanID = ""
+	entry.UserID = ""
+	entry.RequestID = ""
+	entry.IP = ""
+	entry.Caller = ""
+	entry.Function = ""
+	entry.Package = ""
+	entry.StackTrace = ""
+	entry.StackHash = ""
+
+	// 清空Metadata map但保留容量
+	if entry.Metadata != nil {
+		for k := range entry.Metadata {
+			delete(entry.Metadata, k)
+		}
+	}
+
+	logEntryPool.Put(entry)
+}
+
 // ============================================================
 // Logger 内部方法
 // ============================================================
@@ -341,15 +389,15 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 func (l *Logger) log(level, message string, keyvals ...interface{}) {
 	p := l.provider
 
-	// 1. 构造 LogEntry（使用 fastgen 避免系统调用）
-	entry := &sender.LogEntry{
-		ID:        fastgen.NewID(),      // 零系统调用 ID 生成（~50ns vs uuid ~1000ns）
-		Timestamp: fastgen.CachedTime(), // 缓存时间戳，无系统调用（±1ms 误差）
-		Message:   message,
-		Level:     level,
-		Service:   l.service,
-		Metadata:  make(map[string]interface{}),
-	}
+	// 从池中获取entry
+	entry := GetLogEntry() // 或直接从pool.Get()
+	defer PutLogEntry(entry)
+
+	entry.ID = fastgen.NewID()
+	entry.Timestamp = fastgen.CachedTime()
+	entry.Message = message
+	entry.Level = level
+	entry.Service = l.service
 
 	// 2. 添加固定字段
 	for k, v := range l.fields {
