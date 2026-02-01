@@ -32,3 +32,20 @@ data/
 .DS_Store
 Thumbs.db
 loglite_project.md
+
+# 压测结果文件（不需要提交）
+# Profile 文件（CPU/Memory 分析）
+benchmark/**/*.prof
+*.prof
+
+# 压测结果目录（包含 .txt, .md, .prof 等所有结果文件）
+benchmark/**/results/
+benchmark/results/
+
+# 压测生成的日志和快照
+benchmark/**/logs/
+benchmark/**/snapshot/
+
+# 测试二进制文件
+*.test
+benchmark/**/*.test
