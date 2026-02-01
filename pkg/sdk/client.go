@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/loglite/loglite/pkg/sdk/internal/fastgen"
 	"github.com/loglite/loglite/pkg/sdk/sender"
 )
 
@@ -341,10 +341,10 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 func (l *Logger) log(level, message string, keyvals ...interface{}) {
 	p := l.provider
 
-	// 1. 构造 LogEntry
+	// 1. 构造 LogEntry（使用 fastgen 避免系统调用）
 	entry := &sender.LogEntry{
-		ID:        uuid.New().String(),
-		Timestamp: time.Now(),
+		ID:        fastgen.NewID(),      // 零系统调用 ID 生成（~50ns vs uuid ~1000ns）
+		Timestamp: fastgen.CachedTime(), // 缓存时间戳，无系统调用（±1ms 误差）
 		Message:   message,
 		Level:     level,
 		Service:   l.service,
