@@ -48,11 +48,12 @@ type BestEffortSender struct {
 	client *HTTPClient
 
 	// Ring Buffer - 三指针设计
-	buffer    []*LogEntry
-	writePos  int64 // 写指针：下一个可写位置（写入前 CAS 抢占）
-	commitPos int64 // 提交指针：已完成写入的位置（数据可读）
-	readPos   int64 // 读指针：下一个可读位置
-	mask      int64 // bufferSize - 1, 用于位运算取模
+	// 使用值类型数组避免指针逃逸，实现零分配
+	buffer    []LogEntry // 值类型！不是指针
+	writePos  int64      // 写指针：下一个可写位置（写入前 CAS 抢占）
+	commitPos int64      // 提交指针：已完成写入的位置（数据可读）
+	readPos   int64      // 读指针：下一个可读位置
+	mask      int64      // bufferSize - 1, 用于位运算取模
 
 	// 统计
 	stats SenderStats
@@ -71,7 +72,7 @@ func NewBestEffortSender(cfg Config) *BestEffortSender {
 	s := &BestEffortSender{
 		cfg:       cfg,
 		client:    NewHTTPClient(cfg.Endpoint, cfg.Timeout),
-		buffer:    make([]*LogEntry, size),
+		buffer:    make([]LogEntry, size), // 值类型数组
 		mask:      int64(size - 1),
 		stopCh:    make(chan struct{}),
 		stoppedCh: make(chan struct{}),
@@ -101,11 +102,6 @@ func NewBestEffortSender(cfg Config) *BestEffortSender {
 // writePos=8, commitPos=5, readPos=3
 // 表示：位置 3,4 可读，位置 5,6,7 正在写入，位置 8 可抢占
 func (s *BestEffortSender) Send(entry *LogEntry) error {
-	// 深拷贝 entry，避免数据竞争
-	// 原因：调用方可能在 Send 返回后立即复用 entry（通过 sync.Pool）
-	// 但 ring buffer 中的 entry 需要被后台 goroutine 异步处理
-	entryCopy := s.copyEntry(entry)
-
 	for {
 		// 1. 读取当前指针
 		writePos := atomic.LoadInt64(&s.writePos)
@@ -118,34 +114,21 @@ func (s *BestEffortSender) Send(entry *LogEntry) error {
 		}
 
 		// 3. CAS 抢占写位置
-		// 如果 writePos 还是原来的值，就 +1 抢占这个位置
-		// 如果失败说明被其他 goroutine 抢走了，重试
 		if atomic.CompareAndSwapInt64(&s.writePos, writePos, writePos+1) {
-			// 4. 抢占成功！写入数据（使用拷贝的 entry）
+			// 4. 抢占成功！直接值拷贝到 buffer（零分配）
 			idx := writePos & s.mask
-			s.buffer[idx] = entryCopy
+			s.buffer[idx] = entry.DeepCopy() // 值类型赋值，无逃逸！
 
 			// 5. 等待前面的写入都完成，然后提交
-			// commitPos 必须顺序递增，保证读取时数据连续
 			for {
 				if atomic.CompareAndSwapInt64(&s.commitPos, writePos, writePos+1) {
-					// 提交成功
 					break
 				}
-				// 前面还有未提交的，等一下
-				// （实际中很少 spin，因为写入很快）
 			}
 			return nil
 		}
 		// CAS 失败，重试
 	}
-}
-
-// copyEntry 深拷贝 LogEntry（避免与调用方的 sync.Pool 冲突）
-// 使用新的 LogEntry.DeepCopy() 方法，利用 smallFields 的值拷贝特性
-func (s *BestEffortSender) copyEntry(entry *LogEntry) *LogEntry {
-	copied := entry.DeepCopy()
-	return &copied
 }
 
 // backgroundLoop 后台发送循环
@@ -206,25 +189,29 @@ func (s *BestEffortSender) flush() {
 
 // 如果处理数据赶不上writePos，会导致数据丢失
 func (s *BestEffortSender) processBatch(start, end int64) {
-	// 处理从start到end-1的数据
-	// 其他goroutine不会处理这些数据，因为readPos已经>=start
 	batchSize := end - start
 
-	// 收集数据
+	// 收集数据（取 buffer 中值的地址，仅在发送期间有效）
 	batch := make([]*LogEntry, 0, batchSize)
 	for i := int64(0); i < batchSize; i++ {
 		idx := (start + i) & s.mask
-		if entry := s.buffer[idx]; entry != nil {
-			batch = append(batch, entry)
-			s.buffer[idx] = nil
+		// 检查是否有有效数据（ID 非空表示有数据）
+		if s.buffer[idx].ID != "" {
+			batch = append(batch, &s.buffer[idx])
 		}
 	}
 
-	// 发送（如果失败，数据已丢失，因为readPos已更新）
+	// 发送
 	if err := s.client.SendBatch(batch); err != nil {
 		atomic.AddInt64(&s.stats.TotalFailed, int64(len(batch)))
 	} else {
 		atomic.AddInt64(&s.stats.TotalSent, int64(len(batch)))
+	}
+
+	// 清理已发送的 buffer 槽位（重置为零值）
+	for i := int64(0); i < batchSize; i++ {
+		idx := (start + i) & s.mask
+		s.buffer[idx].Reset()
 	}
 }
 

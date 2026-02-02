@@ -57,28 +57,28 @@ func BenchmarkStorage_BatchWrite(b *testing.B) {
 
 	for _, batchSize := range batchSizes {
 		b.Run(fmt.Sprintf("BatchSize_%d", batchSize), func(b *testing.B) {
-			batchCount := b.N / batchSize
-			if batchCount == 0 {
-				batchCount = 1
-			}
+	batchCount := b.N / batchSize
+	if batchCount == 0 {
+		batchCount = 1
+	}
 
-			b.ResetTimer()
-			b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportAllocs()
 
-			for i := 0; i < batchCount; i++ {
-				logs := make([]*model.LogEntry, batchSize)
-				for j := 0; j < batchSize; j++ {
-					logs[j] = &model.LogEntry{
+	for i := 0; i < batchCount; i++ {
+		logs := make([]*model.LogEntry, batchSize)
+		for j := 0; j < batchSize; j++ {
+			logs[j] = &model.LogEntry{
 						ID:        fmt.Sprintf("batch-%d-%d", i, j),
-						Timestamp: model.JSONTime(time.Now()),
-						Message:   "批量测试日志",
-						Level:     "info",
-						Service:   "test-service",
-					}
-				}
-				if err := store.SaveBatch(logs); err != nil {
-					b.Fatal(err)
-				}
+				Timestamp: model.JSONTime(time.Now()),
+				Message:   "批量测试日志",
+				Level:     "info",
+				Service:   "test-service",
+			}
+		}
+		if err := store.SaveBatch(logs); err != nil {
+			b.Fatal(err)
+		}
 			}
 
 			// 报告吞吐量
