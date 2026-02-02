@@ -1,12 +1,12 @@
 package storage
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/loglite/loglite/internal/model"
 )
@@ -49,7 +49,7 @@ func (s *BadgerStore) Save(entry *model.LogEntry) error {
 	// 生成 key: service:timestamp:id
 	key := s.buildKey(entry)
 
-	data, err := json.Marshal(entry)
+	data, err := sonic.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("failed to marshal entry: %w", err)
 	}
@@ -79,7 +79,7 @@ func (s *BadgerStore) SaveBatch(entries []*model.LogEntry) error {
 
 	for _, entry := range entries {
 		key := s.buildKey(entry)
-		data, err := json.Marshal(entry)
+		data, err := sonic.Marshal(entry)
 		if err != nil {
 			continue
 		}
@@ -168,7 +168,7 @@ func (s *BadgerStore) Query(params QueryParams) ([]*model.LogEntry, int, error) 
 			// 读取数据
 			var entry model.LogEntry
 			err := item.Value(func(val []byte) error {
-				return json.Unmarshal(val, &entry)
+				return sonic.Unmarshal(val, &entry)
 			})
 			if err != nil {
 				it.Next()
@@ -243,7 +243,7 @@ func (s *BadgerStore) GetByID(id string) (*model.LogEntry, error) {
 
 			err := item.Value(func(val []byte) error {
 				var e model.LogEntry
-				if err := json.Unmarshal(val, &e); err != nil {
+				if err := sonic.Unmarshal(val, &e); err != nil {
 					return nil
 				}
 				if e.ID == id {

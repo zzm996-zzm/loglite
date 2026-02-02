@@ -1,11 +1,11 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
 	"github.com/loglite/loglite/internal/model"
 )
@@ -151,7 +151,7 @@ func (th *TailHandler) HandleTail(c *gin.Context) {
 			if !ok {
 				return
 			}
-			data, _ := json.Marshal(entry)
+			data, _ := sonic.Marshal(entry)
 			c.SSEvent("log", string(data))
 			c.Writer.Flush()
 

@@ -2,12 +2,13 @@ package sender
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 // ============================================================
@@ -139,7 +140,7 @@ func (w *WALWriter) scanMaxSeqFallback() uint64 {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		var record WALRecord
-		if err := json.Unmarshal(scanner.Bytes(), &record); err == nil {
+		if err := sonic.Unmarshal(scanner.Bytes(), &record); err == nil {
 			if record.Seq > maxSeq {
 				maxSeq = record.Seq
 			}
@@ -165,7 +166,7 @@ func (w *WALWriter) Write(entry LogEntry) (uint64, error) {
 	}
 
 	// 3. 序列化
-	data, err := json.Marshal(record)
+	data, err := sonic.Marshal(record)
 	if err != nil {
 		return 0, fmt.Errorf("marshal record: %w", err)
 	}
@@ -262,7 +263,7 @@ func (w *WALWriter) ReadPending() ([]WALRecord, error) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		var record WALRecord
-		if err := json.Unmarshal(scanner.Bytes(), &record); err == nil {
+		if err := sonic.Unmarshal(scanner.Bytes(), &record); err == nil {
 			// 跳过已发送的
 			if !sentSeqs[record.Seq] {
 				pending = append(pending, record)
@@ -295,7 +296,7 @@ func (w *WALWriter) Compact() error {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		var record WALRecord
-		if err := json.Unmarshal(scanner.Bytes(), &record); err == nil {
+		if err := sonic.Unmarshal(scanner.Bytes(), &record); err == nil {
 			if !sentSeqs[record.Seq] {
 				pending = append(pending, record)
 			}
@@ -312,7 +313,7 @@ func (w *WALWriter) Compact() error {
 
 	writer := bufio.NewWriter(newFile)
 	for _, record := range pending {
-		data, _ := json.Marshal(record)
+		data, _ := sonic.Marshal(record)
 		writer.Write(append(data, '\n'))
 	}
 	writer.Flush()

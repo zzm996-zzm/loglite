@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 var (
@@ -125,7 +126,7 @@ func handleQuery(args []string) {
 	defer resp.Body.Close()
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	sonic.ConfigDefault.NewDecoder(resp.Body).Decode(&result)
 
 	if code, ok := result["code"].(float64); ok && code != 200 {
 		fmt.Fprintf(os.Stderr, "查询失败: %v\n", result["message"])
@@ -185,7 +186,7 @@ func handleTail(args []string) {
 			data = strings.TrimSpace(data)
 
 			var log map[string]interface{}
-			if err := json.Unmarshal([]byte(data), &log); err == nil {
+			if err := sonic.Unmarshal([]byte(data), &log); err == nil {
 				printLog(log)
 			}
 		}
@@ -224,7 +225,7 @@ func handleStats(args []string) {
 		defer resp.Body.Close()
 
 		var result map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&result)
+		sonic.ConfigDefault.NewDecoder(resp.Body).Decode(&result)
 
 		data := result["data"].(map[string]interface{})
 		groups := data["groups"].([]interface{})
@@ -290,7 +291,7 @@ func handleSend(args []string) {
 	defer resp.Body.Close()
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	sonic.ConfigDefault.NewDecoder(resp.Body).Decode(&result)
 
 	if code, ok := result["code"].(float64); ok && code == 200 {
 		data := result["data"].(map[string]interface{})

@@ -3,10 +3,11 @@ package alert
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 // ============================================================
@@ -94,7 +95,7 @@ func (c *WeComChannel) getSeverityEmoji(severity Severity) string {
 }
 
 func (c *WeComChannel) sendWebhook(ctx context.Context, body interface{}) error {
-	data, err := json.Marshal(body)
+	data, err := sonic.Marshal(body)
 	if err != nil {
 		return err
 	}
@@ -230,7 +231,7 @@ func (c *FeishuChannel) getSeverityEmoji(severity Severity) string {
 }
 
 func (c *FeishuChannel) sendWebhook(ctx context.Context, body interface{}) error {
-	data, err := json.Marshal(body)
+	data, err := sonic.Marshal(body)
 	if err != nil {
 		return err
 	}
@@ -354,7 +355,7 @@ func (c *DingTalkChannel) signURL(url string) string {
 }
 
 func (c *DingTalkChannel) sendWebhook(ctx context.Context, url string, body interface{}) error {
-	data, err := json.Marshal(body)
+	data, err := sonic.Marshal(body)
 	if err != nil {
 		return err
 	}
@@ -409,7 +410,7 @@ func (c *WebhookChannel) Name() string {
 
 func (c *WebhookChannel) Send(ctx context.Context, alert *Alert) error {
 	// TODO: 发送到自定义 Webhook
-	data, err := json.Marshal(alert)
+	data, err := sonic.Marshal(alert)
 	if err != nil {
 		return err
 	}

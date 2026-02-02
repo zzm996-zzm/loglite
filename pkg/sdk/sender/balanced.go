@@ -1,11 +1,12 @@
 package sender
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 // ============================================================
@@ -260,7 +261,7 @@ func (s *BalancedSender) saveSnapshot() {
 	}
 
 	// 序列化
-	content, err := json.Marshal(data)
+	content, err := sonic.Marshal(data)
 	if err != nil {
 		return
 	}
@@ -282,7 +283,7 @@ func (s *BalancedSender) recoverFromSnapshot() {
 	}
 
 	var entries []*LogEntry
-	if err := json.Unmarshal(content, &entries); err != nil {
+	if err := sonic.Unmarshal(content, &entries); err != nil {
 		return
 	}
 
@@ -308,7 +309,7 @@ func (s *BalancedSender) writeToFallback(entries []*LogEntry) {
 	defer file.Close()
 
 	for _, entry := range entries {
-		line, _ := json.Marshal(entry)
+		line, _ := sonic.Marshal(entry)
 		file.Write(append(line, '\n'))
 	}
 }
@@ -338,7 +339,7 @@ func (s *BalancedSender) recoverFromFallback() {
 			continue
 		}
 		var entry LogEntry
-		if err := json.Unmarshal(line, &entry); err == nil {
+		if err := sonic.Unmarshal(line, &entry); err == nil {
 			entries = append(entries, &entry)
 		}
 	}
@@ -427,6 +428,3 @@ func (s *BalancedSender) Stats() *SenderStats {
 	stats := s.stats
 	return &stats
 }
-
-// 确保实现接口
-var _ = json.Marshal // 避免 import 未使用警告

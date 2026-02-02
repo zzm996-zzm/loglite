@@ -2,12 +2,13 @@ package sender
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 // ============================================================
@@ -307,7 +308,7 @@ func (c *HTTPClient) SendBatch(entries []*LogEntry) error {
 	defer c.mu.Unlock()
 
 	// 1. 序列化请求体
-	body, err := json.Marshal(map[string]interface{}{"logs": entries})
+	body, err := sonic.Marshal(map[string]interface{}{"logs": entries})
 	if err != nil {
 		return fmt.Errorf("marshal logs: %w", err)
 	}
@@ -340,7 +341,7 @@ func (c *HTTPClient) SendBatch(entries []*LogEntry) error {
 		Message string `json:"message"`
 		Error   string `json:"error,omitempty"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := sonic.ConfigDefault.NewDecoder(resp.Body).Decode(&result); err != nil {
 		// 响应解析失败不影响发送（可能服务端没返回 JSON）
 		return nil
 	}
