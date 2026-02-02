@@ -415,13 +415,9 @@ func NewReliableSender(cfg Config) *ReliableSender {
 // Send 发送日志
 // 流程：WAL 写入 -> 内存缓冲 -> 触发发送
 func (s *ReliableSender) Send(entry *LogEntry) error {
-	// 深拷贝 entry，避免数据竞争
-	// 虽然 WAL.Write 会立即序列化，但为了代码一致性和安全性，统一深拷贝
-	entryCopy := s.copyEntry(entry)
-
 	// 1. 先写入 WAL（持久化）
 	// 这一步是关键：写入成功才算日志不会丢失
-	seq, err := s.wal.Write(entryCopy)
+	seq, err := s.wal.Write(*entry)
 	if err != nil {
 		// WAL 写入失败，返回错误
 		// 调用方可以选择重试或降级
@@ -437,7 +433,7 @@ func (s *ReliableSender) Send(entry *LogEntry) error {
 	s.pendingMu.Lock()
 	s.pending = append(s.pending, WALRecord{
 		Seq:   seq,
-		Entry: entryCopy, // 使用拷贝的 entry，避免数据竞争
+		Entry: *entry,
 	})
 	shouldFlush := len(s.pending) >= s.cfg.BatchSize
 	s.pendingMu.Unlock()
@@ -570,12 +566,6 @@ func (s *ReliableSender) flush() {
 func (s *ReliableSender) Flush() error {
 	s.flush()
 	return nil
-}
-
-// copyEntry 深拷贝 LogEntry（避免与调用方的 sync.Pool 冲突）
-// 使用新的 LogEntry.DeepCopy() 方法，利用 smallFields 的值拷贝特性（零额外分配）
-func (s *ReliableSender) copyEntry(entry *LogEntry) LogEntry {
-	return entry.DeepCopy()
 }
 
 // Close 关闭发送器

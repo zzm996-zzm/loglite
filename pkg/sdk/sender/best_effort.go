@@ -48,12 +48,11 @@ type BestEffortSender struct {
 	client *HTTPClient
 
 	// Ring Buffer - 三指针设计
-	// 使用值类型数组避免指针逃逸，实现零分配
-	buffer    []LogEntry // 值类型！不是指针
-	writePos  int64      // 写指针：下一个可写位置（写入前 CAS 抢占）
-	commitPos int64      // 提交指针：已完成写入的位置（数据可读）
-	readPos   int64      // 读指针：下一个可读位置
-	mask      int64      // bufferSize - 1, 用于位运算取模
+	buffer    []*LogEntry
+	writePos  int64 // 写指针：下一个可写位置（写入前 CAS 抢占）
+	commitPos int64 // 提交指针：已完成写入的位置（数据可读）
+	readPos   int64 // 读指针：下一个可读位置
+	mask      int64 // bufferSize - 1, 用于位运算取模
 
 	// 统计
 	stats SenderStats
@@ -72,7 +71,7 @@ func NewBestEffortSender(cfg Config) *BestEffortSender {
 	s := &BestEffortSender{
 		cfg:       cfg,
 		client:    NewHTTPClient(cfg.Endpoint, cfg.Timeout),
-		buffer:    make([]LogEntry, size), // 值类型数组
+		buffer:    make([]*LogEntry, size),
 		mask:      int64(size - 1),
 		stopCh:    make(chan struct{}),
 		stoppedCh: make(chan struct{}),
@@ -114,16 +113,22 @@ func (s *BestEffortSender) Send(entry *LogEntry) error {
 		}
 
 		// 3. CAS 抢占写位置
+		// 如果 writePos 还是原来的值，就 +1 抢占这个位置
+		// 如果失败说明被其他 goroutine 抢走了，重试
 		if atomic.CompareAndSwapInt64(&s.writePos, writePos, writePos+1) {
-			// 4. 抢占成功！直接值拷贝到 buffer（零分配）
+			// 4. 抢占成功！写入数据
 			idx := writePos & s.mask
-			s.buffer[idx] = entry.DeepCopy() // 值类型赋值，无逃逸！
+			s.buffer[idx] = entry
 
 			// 5. 等待前面的写入都完成，然后提交
+			// commitPos 必须顺序递增，保证读取时数据连续
 			for {
 				if atomic.CompareAndSwapInt64(&s.commitPos, writePos, writePos+1) {
+					// 提交成功
 					break
 				}
+				// 前面还有未提交的，等一下
+				// （实际中很少 spin，因为写入很快）
 			}
 			return nil
 		}
@@ -189,29 +194,25 @@ func (s *BestEffortSender) flush() {
 
 // 如果处理数据赶不上writePos，会导致数据丢失
 func (s *BestEffortSender) processBatch(start, end int64) {
+	// 处理从start到end-1的数据
+	// 其他goroutine不会处理这些数据，因为readPos已经>=start
 	batchSize := end - start
 
-	// 收集数据（取 buffer 中值的地址，仅在发送期间有效）
+	// 收集数据
 	batch := make([]*LogEntry, 0, batchSize)
 	for i := int64(0); i < batchSize; i++ {
 		idx := (start + i) & s.mask
-		// 检查是否有有效数据（ID 非空表示有数据）
-		if s.buffer[idx].ID != "" {
-			batch = append(batch, &s.buffer[idx])
+		if entry := s.buffer[idx]; entry != nil {
+			batch = append(batch, entry)
+			s.buffer[idx] = nil
 		}
 	}
 
-	// 发送
+	// 发送（如果失败，数据已丢失，因为readPos已更新）
 	if err := s.client.SendBatch(batch); err != nil {
 		atomic.AddInt64(&s.stats.TotalFailed, int64(len(batch)))
 	} else {
 		atomic.AddInt64(&s.stats.TotalSent, int64(len(batch)))
-	}
-
-	// 清理已发送的 buffer 槽位（重置为零值）
-	for i := int64(0); i < batchSize; i++ {
-		idx := (start + i) & s.mask
-		s.buffer[idx].Reset()
 	}
 }
 

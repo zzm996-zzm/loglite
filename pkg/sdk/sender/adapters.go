@@ -48,33 +48,30 @@ func (r *ZapLogRecord) ToLogEntry() *LogEntry {
 		Function:   r.Function,
 		Package:    r.Package,
 		StackTrace: r.StackTrace,
+		Metadata:   r.Fields,
 	}
 
 	// 从 Fields 中提取推荐字段
-	if r.Fields != nil {
-		if v, ok := r.Fields["trace_id"].(string); ok {
+	if entry.Metadata != nil {
+		if v, ok := entry.Metadata["trace_id"].(string); ok {
 			entry.TraceID = v
-			delete(r.Fields, "trace_id")
+			delete(entry.Metadata, "trace_id")
 		}
-		if v, ok := r.Fields["span_id"].(string); ok {
+		if v, ok := entry.Metadata["span_id"].(string); ok {
 			entry.SpanID = v
-			delete(r.Fields, "span_id")
+			delete(entry.Metadata, "span_id")
 		}
-		if v, ok := r.Fields["user_id"].(string); ok {
+		if v, ok := entry.Metadata["user_id"].(string); ok {
 			entry.UserID = v
-			delete(r.Fields, "user_id")
+			delete(entry.Metadata, "user_id")
 		}
-		if v, ok := r.Fields["request_id"].(string); ok {
+		if v, ok := entry.Metadata["request_id"].(string); ok {
 			entry.RequestID = v
-			delete(r.Fields, "request_id")
+			delete(entry.Metadata, "request_id")
 		}
-		if v, ok := r.Fields["ip"].(string); ok {
+		if v, ok := entry.Metadata["ip"].(string); ok {
 			entry.IP = v
-			delete(r.Fields, "ip")
-		}
-		// 剩余字段放入动态字段
-		for k, v := range r.Fields {
-			entry.SetField(k, v)
+			delete(entry.Metadata, "ip")
 		}
 	}
 
@@ -110,6 +107,7 @@ func (r *ZerologRecord) ToLogEntry() *LogEntry {
 		Timestamp: r.Time,
 		Level:     r.Level,
 		Message:   r.Message,
+		Metadata:  r.Fields,
 	}
 
 	// 从 fields 提取标准字段
@@ -132,11 +130,6 @@ func (r *ZerologRecord) ToLogEntry() *LogEntry {
 		entry.Package = extractAndDelete("package")
 		entry.StackTrace = extractAndDelete("stack_trace")
 		entry.StackHash = extractAndDelete("stack_hash")
-
-		// 剩余字段放入动态字段
-		for k, v := range r.Fields {
-			entry.SetField(k, v)
-		}
 	}
 
 	return entry
@@ -178,6 +171,7 @@ func (r *SlogRecord) ToLogEntry() *LogEntry {
 		Level:     r.Level,
 		Message:   r.Message,
 		Caller:    r.Source,
+		Metadata:  r.Fields,
 	}
 
 	// 从 Fields 中提取推荐字段
@@ -199,11 +193,6 @@ func (r *SlogRecord) ToLogEntry() *LogEntry {
 		entry.Package = extractAndDelete("package")
 		entry.StackTrace = extractAndDelete("stack_trace")
 		entry.StackHash = extractAndDelete("stack_hash")
-
-		// 剩余字段放入动态字段
-		for k, v := range r.Fields {
-			entry.SetField(k, v)
-		}
 	}
 
 	return entry
@@ -229,6 +218,7 @@ func (a *JSONAdapter) AdaptJSON(data map[string]interface{}) *LogEntry {
 	entry := &LogEntry{
 		Timestamp: time.Now(),
 		Service:   a.Service,
+		Metadata:  make(map[string]interface{}),
 	}
 
 	// Message 字段
@@ -306,9 +296,9 @@ func (a *JSONAdapter) AdaptJSON(data map[string]interface{}) *LogEntry {
 	extractString([]string{"stack_trace", "stackTrace", "StackTrace", "stack"}, func(v string) { entry.StackTrace = v })
 	extractString([]string{"stack_hash", "stackHash", "StackHash"}, func(v string) { entry.StackHash = v })
 
-	// 剩余字段放入动态字段
+	// 剩余字段放入 Metadata
 	for k, v := range data {
-		entry.SetField(k, v)
+		entry.Metadata[k] = v
 	}
 
 	return entry

@@ -58,11 +58,9 @@ import (
 // 示意图：
 //
 //	Write() ──► [front] ◄──swap──► [back] ──► Send()
-//
-// 注意：使用指针切片，避免 Swap 时复制整个 LogEntry 结构体
 type DoubleBuffer struct {
-	front []*LogEntry // 前台：正在接收写入（指针切片）
-	back  []*LogEntry // 后台：等待/正在发送（指针切片）
+	front []*LogEntry // 前台：正在接收写入
+	back  []*LogEntry // 后台：等待/正在发送
 	cap   int         // 缓冲区容量
 	mu    sync.Mutex
 }
@@ -90,7 +88,6 @@ func (db *DoubleBuffer) Write(entry *LogEntry) bool {
 //
 // 操作：front 和 back 互换
 // 返回：原 front 的数据（现在是 back）
-// 关键优化：直接返回指针切片，无需复制 LogEntry 结构体！
 func (db *DoubleBuffer) Swap() []*LogEntry {
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -98,13 +95,14 @@ func (db *DoubleBuffer) Swap() []*LogEntry {
 	db.front, db.back = db.back, db.front
 
 	// 返回 back 的数据（就是刚才的 front）
-	// 直接返回指针切片，无需复制！
-	result := db.back
+	// 复制一份，因为 back 会被清空重用
+	data := make([]*LogEntry, len(db.back))
+	copy(data, db.back)
 
 	// 清空 back，为下次 swap 做准备
 	db.back = db.back[:0]
 
-	return result
+	return data
 }
 
 // GetActive 获取前台缓冲区的数据（用于快照，不清空）
@@ -112,10 +110,9 @@ func (db *DoubleBuffer) GetActive() []*LogEntry {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	// 返回指针切片的副本（只复制指针，不复制 LogEntry）
-	result := make([]*LogEntry, len(db.front))
-	copy(result, db.front)
-	return result
+	data := make([]*LogEntry, len(db.front))
+	copy(data, db.front)
+	return data
 }
 
 // BalancedSender 平衡模式发送器
@@ -178,13 +175,8 @@ func NewBalancedSender(cfg Config) *BalancedSender {
 
 // Send 发送日志
 func (s *BalancedSender) Send(entry *LogEntry) error {
-	// 深拷贝 entry，避免数据竞争
-	// 原因：调用方可能在 Send 返回后立即复用 entry（通过 sync.Pool）
-	// 但双缓冲中的 entry 需要被后台 goroutine 异步处理
-	entryCopy := s.copyEntry(entry)
-
-	// 写入双缓冲（指针方案）
-	isFull := s.doubleBuffer.Write(entryCopy)
+	// 写入双缓冲
+	isFull := s.doubleBuffer.Write(entry)
 
 	// 如果满了，触发 swap
 	if isFull {
@@ -196,13 +188,6 @@ func (s *BalancedSender) Send(entry *LogEntry) error {
 	}
 
 	return nil
-}
-
-// copyEntry 深拷贝 LogEntry（避免与调用方的 sync.Pool 冲突）
-// 返回指针，因为 DoubleBuffer 使用指针切片
-func (s *BalancedSender) copyEntry(entry *LogEntry) *LogEntry {
-	copied := entry.DeepCopy()
-	return &copied
 }
 
 // backgroundLoop 后台发送循环
@@ -232,12 +217,13 @@ func (s *BalancedSender) backgroundLoop() {
 
 // swapAndSend 切换并发送
 func (s *BalancedSender) swapAndSend() {
+
 	entries := s.doubleBuffer.Swap()
 	if len(entries) == 0 {
 		return
 	}
 
-	// 发送（已经是指针切片，无需转换）
+	// 发送
 	if err := s.client.SendBatch(entries); err != nil {
 		// 发送失败，写入降级文件
 		s.writeToFallback(entries)
@@ -274,13 +260,15 @@ func (s *BalancedSender) snapshotLoop() {
 
 // saveSnapshot 保存快照
 func (s *BalancedSender) saveSnapshot() {
-	entries := s.doubleBuffer.GetActive()
-	if len(entries) == 0 {
+
+	//
+	data := s.doubleBuffer.GetActive()
+	if len(data) == 0 {
 		return
 	}
 
-	// 序列化（JSON 可以直接序列化指针切片）
-	content, err := json.Marshal(entries)
+	// 序列化
+	content, err := json.Marshal(data)
 	if err != nil {
 		return
 	}
@@ -295,6 +283,7 @@ func (s *BalancedSender) saveSnapshot() {
 
 // recoverFromSnapshot 从快照恢复
 func (s *BalancedSender) recoverFromSnapshot() {
+
 	content, err := os.ReadFile(s.snapshotFile)
 	if err != nil {
 		return // 没有快照文件
@@ -305,7 +294,7 @@ func (s *BalancedSender) recoverFromSnapshot() {
 		return
 	}
 
-	// 重新写入缓冲区（已经是指针）
+	// 重新写入缓冲区
 	for _, entry := range entries {
 		s.doubleBuffer.Write(entry)
 	}
