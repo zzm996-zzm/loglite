@@ -84,25 +84,17 @@ func (db *DoubleBuffer) Write(entry *LogEntry) bool {
 	return len(db.front) >= db.cap
 }
 
-// Swap 交换前后台，返回后台数据用于发送
-//
-// 操作：front 和 back 互换
-// 返回：原 front 的数据（现在是 back）
 func (db *DoubleBuffer) Swap() []*LogEntry {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
 	db.front, db.back = db.back, db.front
 
-	// 返回 back 的数据（就是刚才的 front）
-	// 复制一份，因为 back 会被清空重用
-	data := make([]*LogEntry, len(db.back))
-	copy(data, db.back)
+	// 直接返回指针，不深拷贝！
+	result := db.back
 
-	// 清空 back，为下次 swap 做准备
-	db.back = db.back[:0]
-
-	return data
+	db.back = db.back[:0] // 只是重置slice，不改变底层数组
+	return result
 }
 
 // GetActive 获取前台缓冲区的数据（用于快照，不清空）
