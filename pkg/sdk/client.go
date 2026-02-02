@@ -337,56 +337,20 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 
 var logEntryPool = sync.Pool{
 	New: func() interface{} {
-		return &sender.LogEntry{
-			// 预分配Metadata map，避免后续分配
-			Metadata: make(map[string]interface{}, 8), // 根据实际使用情况调整容量
-		}
+		return &sender.LogEntry{}
 	},
 }
 
-// 获取LogEntry（从池中或新建）
+// GetLogEntry 获取 LogEntry（从池中或新建）
 func GetLogEntry() *sender.LogEntry {
 	entry := logEntryPool.Get().(*sender.LogEntry)
-
-	// 重置时间字段（time.Time是值类型，会重置为零值）
-	entry.Timestamp = time.Time{}
-	entry.ReceivedAt = time.Time{}
-	entry.StoredAt = time.Time{}
-
-	// 确保 Metadata 是一个干净的空 map
-	// 如果清理失败或为 nil，重新创建以避免脏数据
-	if entry.Metadata == nil || len(entry.Metadata) > 0 {
-		entry.Metadata = make(map[string]interface{}, 8)
-	}
-
+	entry.Reset() // 使用 LogEntry 自带的 Reset 方法
 	return entry
 }
 
-// 归还LogEntry到池中
+// PutLogEntry 归还 LogEntry 到池中
 func PutLogEntry(entry *sender.LogEntry) {
-	// 重置所有字符串字段（避免内存泄漏）
-	entry.ID = ""
-	entry.Message = ""
-	entry.Level = ""
-	entry.Service = ""
-	entry.TraceID = ""
-	entry.SpanID = ""
-	entry.UserID = ""
-	entry.RequestID = ""
-	entry.IP = ""
-	entry.Caller = ""
-	entry.Function = ""
-	entry.Package = ""
-	entry.StackTrace = ""
-	entry.StackHash = ""
-
-	// 清空Metadata map但保留容量
-	if entry.Metadata != nil {
-		for k := range entry.Metadata {
-			delete(entry.Metadata, k)
-		}
-	}
-
+	entry.Reset() // 使用 LogEntry 自带的 Reset 方法
 	logEntryPool.Put(entry)
 }
 
@@ -421,7 +385,7 @@ func (l *Logger) log(level, message string, keyvals ...interface{}) {
 		case "ip":
 			entry.IP = fmt.Sprintf("%v", v)
 		default:
-			entry.Metadata[k] = v
+			entry.SetField(k, v) // 使用新的 SetField 方法
 		}
 	}
 
@@ -445,7 +409,7 @@ func (l *Logger) log(level, message string, keyvals ...interface{}) {
 		case "ip":
 			entry.IP = fmt.Sprintf("%v", value)
 		default:
-			entry.Metadata[key] = value
+			entry.SetField(key, value) // 使用新的 SetField 方法
 		}
 	}
 

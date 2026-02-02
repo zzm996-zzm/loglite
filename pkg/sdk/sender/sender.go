@@ -12,41 +12,10 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// ============================================================
-// 日志条目抽象
-// ============================================================
-
-// LogEntry 日志条目（通用结构，用于发送）
-// 这是 loglite 的标准日志格式
-type LogEntry struct {
-	// 必填字段
-	ID        string    `json:"id"`        // UUID
-	Timestamp time.Time `json:"timestamp"` // 时间戳
-	Message   string    `json:"message"`   // 日志消息
-	Level     string    `json:"level"`     // info/warn/error/debug
-	Service   string    `json:"service"`   // 服务名称
-
-	// 推荐字段（SDK自动填充或用户提供）
-	TraceID   string `json:"trace_id,omitempty"`   // 追踪ID（分布式追踪）
-	SpanID    string `json:"span_id,omitempty"`    // 跨度ID（分布式追踪）
-	UserID    string `json:"user_id,omitempty"`    // 用户ID
-	RequestID string `json:"request_id,omitempty"` // 请求ID
-	IP        string `json:"ip,omitempty"`         // IP地址
-
-	// 代码位置（SDK自动采集，解决「上下文不足」痛点）
-	Caller     string `json:"caller,omitempty"`      // 调用位置 "main.go:42"
-	Function   string `json:"function,omitempty"`    // 函数名 "main.HandleOrder"
-	Package    string `json:"package,omitempty"`     // 包名 "github.com/xxx/service"
-	StackTrace string `json:"stack_trace,omitempty"` // 错误堆栈（仅 error 级别）
-	StackHash  string `json:"stack_hash,omitempty"`  // 堆栈指纹（用于错误聚合）
-
-	// 任意字段
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-
-	// 系统字段（内部使用，不序列化）
-	ReceivedAt time.Time `json:"-"` // 接收时间（服务端填充）
-	StoredAt   time.Time `json:"-"` // 存储时间（服务端填充）
-}
+// LogEntry 定义在 entry.go 中（小对象优化版本）
+// - smallFields [8]FieldEntry: 固定数组，零额外分配
+// - extraFields []FieldEntry: 按需扩展
+// - overflow map: 极端情况
 
 // LogRecord 日志记录接口
 // 用于兼容不同日志框架（zap、zerolog、slog 等）
@@ -80,7 +49,6 @@ func (a *MapAdapter) Adapt(data interface{}) *LogEntry {
 	entry := &LogEntry{
 		Timestamp: time.Now(),
 		Service:   a.Service,
-		Metadata:  make(map[string]interface{}),
 	}
 
 	// 提取标准字段
@@ -124,32 +92,15 @@ func (a *MapAdapter) Adapt(data interface{}) *LogEntry {
 		delete(m, "timestamp")
 	}
 
-	// 剩余字段放入 metadata
+	// 剩余字段放入动态字段
 	for k, v := range m {
-		entry.Metadata[k] = v
+		entry.SetField(k, v)
 	}
 
 	return entry
 }
 
-// RawLogEntry 直接实现 LogRecord 的 LogEntry
-// 方便直接使用
-func (e *LogEntry) ToLogEntry() *LogEntry {
-	return e
-}
-
-// 或者为LogEntry添加Reset方法
-func (e *LogEntry) Reset() {
-	// 使用指针清零，更快
-	*e = LogEntry{
-		// 重用Metadata map
-		Metadata: e.Metadata,
-	}
-	// 清空map
-	for k := range e.Metadata {
-		delete(e.Metadata, k)
-	}
-}
+// 注意：LogEntry.ToLogEntry() 和 LogEntry.Reset() 定义在 entry.go 中
 
 // Reliability 可靠性级别
 type Reliability int

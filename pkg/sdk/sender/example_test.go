@@ -84,16 +84,15 @@ func Example_sendMethods() {
 	// ============================================================
 	// 方式 1: 直接发送 LogEntry
 	// ============================================================
-	s.Send(&sender.LogEntry{
+	entry := &sender.LogEntry{
 		Timestamp: time.Now(),
 		Message:   "user login",
 		Level:     "info",
 		Service:   "auth-service",
-		Metadata: map[string]interface{}{
-			"user_id": 12345,
-			"ip":      "192.168.1.1",
-		},
-	})
+	}
+	entry.SetField("user_id", 12345)
+	entry.SetField("ip", "192.168.1.1")
+	s.Send(entry)
 
 	// ============================================================
 	// 方式 2: 发送 Map（灵活格式）

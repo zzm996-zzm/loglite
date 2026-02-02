@@ -573,34 +573,9 @@ func (s *ReliableSender) Flush() error {
 }
 
 // copyEntry 深拷贝 LogEntry（避免与调用方的 sync.Pool 冲突）
+// 使用新的 LogEntry.DeepCopy() 方法，利用 smallFields 的值拷贝特性（零额外分配）
 func (s *ReliableSender) copyEntry(entry *LogEntry) LogEntry {
-	copied := LogEntry{
-		ID:         entry.ID,
-		Timestamp:  entry.Timestamp,
-		Message:    entry.Message,
-		Level:      entry.Level,
-		Service:    entry.Service,
-		TraceID:    entry.TraceID,
-		SpanID:     entry.SpanID,
-		UserID:     entry.UserID,
-		RequestID:  entry.RequestID,
-		IP:         entry.IP,
-		Caller:     entry.Caller,
-		Function:   entry.Function,
-		Package:    entry.Package,
-		StackTrace: entry.StackTrace,
-		StackHash:  entry.StackHash,
-		ReceivedAt: entry.ReceivedAt,
-		StoredAt:   entry.StoredAt,
-		Metadata:   make(map[string]interface{}, len(entry.Metadata)),
-	}
-
-	// 深拷贝 Metadata
-	for k, v := range entry.Metadata {
-		copied.Metadata[k] = v
-	}
-
-	return copied
+	return entry.DeepCopy()
 }
 
 // Close 关闭发送器
