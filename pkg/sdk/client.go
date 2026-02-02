@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/loglite/loglite/internal/model"
 	"github.com/loglite/loglite/pkg/sdk/internal/fastgen"
 	"github.com/loglite/loglite/pkg/sdk/sender"
 )
@@ -342,13 +343,12 @@ func (l *Logger) log(level, message string, keyvals ...interface{}) {
 	p := l.provider
 
 	// 1. 构造 LogEntry（使用 fastgen 避免系统调用）
-	entry := &sender.LogEntry{
+	entry := &model.LogEntry{
 		ID:        fastgen.NewID(),      // 零系统调用 ID 生成（~50ns vs uuid ~1000ns）
 		Timestamp: fastgen.CachedTime(), // 缓存时间戳，无系统调用（±1ms 误差）
 		Message:   message,
 		Level:     level,
 		Service:   l.service,
-		Metadata:  make(map[string]interface{}),
 	}
 
 	// 2. 添加固定字段
@@ -365,7 +365,8 @@ func (l *Logger) log(level, message string, keyvals ...interface{}) {
 		case "ip":
 			entry.IP = fmt.Sprintf("%v", v)
 		default:
-			entry.Metadata[k] = v
+			// 直接设置 metadata（零分配）
+			entry.SetMetadata(k, v)
 		}
 	}
 
@@ -389,7 +390,8 @@ func (l *Logger) log(level, message string, keyvals ...interface{}) {
 		case "ip":
 			entry.IP = fmt.Sprintf("%v", value)
 		default:
-			entry.Metadata[key] = value
+			// 直接设置 metadata（零分配）
+			entry.SetMetadata(key, value)
 		}
 	}
 

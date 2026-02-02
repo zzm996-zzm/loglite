@@ -17,9 +17,9 @@ import (
 type Format string
 
 const (
-	FormatJSON Format = "json" // JSON 格式
-	FormatCSV  Format = "csv"  // CSV 格式
-	FormatText Format = "text" // 纯文本格式
+	FormatJSON  Format = "json" // JSON 格式
+	FormatCSV   Format = "csv"  // CSV 格式
+	FormatText  Format = "text" // 纯文本格式
 	FormatExcel Format = "xlsx" // Excel 格式
 )
 
@@ -27,7 +27,7 @@ const (
 type Exporter interface {
 	// Export 导出日志
 	Export(ctx context.Context, logs []*model.LogEntry, writer io.Writer) error
-	
+
 	// Format 返回格式名称
 	Format() Format
 }
@@ -41,11 +41,11 @@ type ExportRequest struct {
 	StartTime time.Time // 开始时间
 	EndTime   time.Time // 结束时间
 	Limit     int       // 限制数量
-	
+
 	// 导出选项
-	Format  Format   // 导出格式
-	Fields  []string // 导出字段（可选，默认全部）
-	Compress bool    // 是否压缩
+	Format   Format   // 导出格式
+	Fields   []string // 导出字段（可选，默认全部）
+	Compress bool     // 是否压缩
 }
 
 // ExportManager 导出管理器
@@ -72,13 +72,13 @@ func (m *ExportManager) Export(ctx context.Context, req *ExportRequest, writer i
 	if err != nil {
 		return err
 	}
-	
+
 	// 2. 获取对应格式的导出器
 	exporter, ok := m.exporters[req.Format]
 	if !ok {
 		return ErrUnsupportedFormat
 	}
-	
+
 	// 3. 导出
 	return exporter.Export(ctx, logs, writer)
 }
@@ -203,13 +203,13 @@ func (e *ExportError) Error() string {
 func ExportHandler(manager *ExportManager) interface{} {
 	// TODO: 实现导出 API
 	// GET /api/v1/logs/export?format=json&service=xxx&start=xxx&end=xxx
-	// 
+	//
 	// 响应：
 	// - JSON: 直接返回 JSON 数组
 	// - CSV: Content-Type: text/csv; charset=utf-8
 	// - Text: Content-Type: text/plain; charset=utf-8
 	// - Excel: Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-	// 
+	//
 	// 文件名：loglite_export_20240115_143200.{json|csv|txt|xlsx}
 	return nil
 }

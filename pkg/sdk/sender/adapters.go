@@ -48,30 +48,34 @@ func (r *ZapLogRecord) ToLogEntry() *LogEntry {
 		Function:   r.Function,
 		Package:    r.Package,
 		StackTrace: r.StackTrace,
-		Metadata:   r.Fields,
 	}
 
 	// 从 Fields 中提取推荐字段
-	if entry.Metadata != nil {
-		if v, ok := entry.Metadata["trace_id"].(string); ok {
+	if r.Fields != nil {
+		if v, ok := r.Fields["trace_id"].(string); ok {
 			entry.TraceID = v
-			delete(entry.Metadata, "trace_id")
 		}
-		if v, ok := entry.Metadata["span_id"].(string); ok {
+		if v, ok := r.Fields["span_id"].(string); ok {
 			entry.SpanID = v
-			delete(entry.Metadata, "span_id")
 		}
-		if v, ok := entry.Metadata["user_id"].(string); ok {
+		if v, ok := r.Fields["user_id"].(string); ok {
 			entry.UserID = v
-			delete(entry.Metadata, "user_id")
 		}
-		if v, ok := entry.Metadata["request_id"].(string); ok {
+		if v, ok := r.Fields["request_id"].(string); ok {
 			entry.RequestID = v
-			delete(entry.Metadata, "request_id")
 		}
-		if v, ok := entry.Metadata["ip"].(string); ok {
+		if v, ok := r.Fields["ip"].(string); ok {
 			entry.IP = v
-			delete(entry.Metadata, "ip")
+		}
+
+		// 剩余字段放入 metadata（零分配）
+		for k, v := range r.Fields {
+			switch k {
+			case "trace_id", "span_id", "user_id", "request_id", "ip":
+				// 已提取，跳过
+			default:
+				entry.SetMetadata(k, v)
+			}
 		}
 	}
 
@@ -107,29 +111,38 @@ func (r *ZerologRecord) ToLogEntry() *LogEntry {
 		Timestamp: r.Time,
 		Level:     r.Level,
 		Message:   r.Message,
-		Metadata:  r.Fields,
 	}
 
 	// 从 fields 提取标准字段
 	if r.Fields != nil {
-		extractAndDelete := func(key string) string {
+		extractString := func(key string) string {
 			if v, ok := r.Fields[key].(string); ok {
-				delete(r.Fields, key)
 				return v
 			}
 			return ""
 		}
 
-		entry.TraceID = extractAndDelete("trace_id")
-		entry.SpanID = extractAndDelete("span_id")
-		entry.UserID = extractAndDelete("user_id")
-		entry.RequestID = extractAndDelete("request_id")
-		entry.IP = extractAndDelete("ip")
-		entry.Caller = extractAndDelete("caller")
-		entry.Function = extractAndDelete("function")
-		entry.Package = extractAndDelete("package")
-		entry.StackTrace = extractAndDelete("stack_trace")
-		entry.StackHash = extractAndDelete("stack_hash")
+		entry.TraceID = extractString("trace_id")
+		entry.SpanID = extractString("span_id")
+		entry.UserID = extractString("user_id")
+		entry.RequestID = extractString("request_id")
+		entry.IP = extractString("ip")
+		entry.Caller = extractString("caller")
+		entry.Function = extractString("function")
+		entry.Package = extractString("package")
+		entry.StackTrace = extractString("stack_trace")
+		entry.StackHash = extractString("stack_hash")
+
+		// 剩余字段放入 metadata（零分配）
+		for k, v := range r.Fields {
+			switch k {
+			case "trace_id", "span_id", "user_id", "request_id", "ip",
+				"caller", "function", "package", "stack_trace", "stack_hash":
+				// 已提取，跳过
+			default:
+				entry.SetMetadata(k, v)
+			}
+		}
 	}
 
 	return entry
@@ -171,28 +184,37 @@ func (r *SlogRecord) ToLogEntry() *LogEntry {
 		Level:     r.Level,
 		Message:   r.Message,
 		Caller:    r.Source,
-		Metadata:  r.Fields,
 	}
 
 	// 从 Fields 中提取推荐字段
 	if r.Fields != nil {
-		extractAndDelete := func(key string) string {
+		extractString := func(key string) string {
 			if v, ok := r.Fields[key].(string); ok {
-				delete(r.Fields, key)
 				return v
 			}
 			return ""
 		}
 
-		entry.TraceID = extractAndDelete("trace_id")
-		entry.SpanID = extractAndDelete("span_id")
-		entry.UserID = extractAndDelete("user_id")
-		entry.RequestID = extractAndDelete("request_id")
-		entry.IP = extractAndDelete("ip")
-		entry.Function = extractAndDelete("function")
-		entry.Package = extractAndDelete("package")
-		entry.StackTrace = extractAndDelete("stack_trace")
-		entry.StackHash = extractAndDelete("stack_hash")
+		entry.TraceID = extractString("trace_id")
+		entry.SpanID = extractString("span_id")
+		entry.UserID = extractString("user_id")
+		entry.RequestID = extractString("request_id")
+		entry.IP = extractString("ip")
+		entry.Function = extractString("function")
+		entry.Package = extractString("package")
+		entry.StackTrace = extractString("stack_trace")
+		entry.StackHash = extractString("stack_hash")
+
+		// 剩余字段放入 metadata（零分配）
+		for k, v := range r.Fields {
+			switch k {
+			case "trace_id", "span_id", "user_id", "request_id", "ip",
+				"function", "package", "stack_trace", "stack_hash":
+				// 已提取，跳过
+			default:
+				entry.SetMetadata(k, v)
+			}
+		}
 	}
 
 	return entry
@@ -218,7 +240,7 @@ func (a *JSONAdapter) AdaptJSON(data map[string]interface{}) *LogEntry {
 	entry := &LogEntry{
 		Timestamp: time.Now(),
 		Service:   a.Service,
-		Metadata:  make(map[string]interface{}),
+		// metadata 零分配，只在有字段时使用
 	}
 
 	// Message 字段
@@ -296,9 +318,9 @@ func (a *JSONAdapter) AdaptJSON(data map[string]interface{}) *LogEntry {
 	extractString([]string{"stack_trace", "stackTrace", "StackTrace", "stack"}, func(v string) { entry.StackTrace = v })
 	extractString([]string{"stack_hash", "stackHash", "StackHash"}, func(v string) { entry.StackHash = v })
 
-	// 剩余字段放入 Metadata
+	// 剩余字段放入 Metadata（零分配）
 	for k, v := range data {
-		entry.Metadata[k] = v
+		entry.SetMetadata(k, v)
 	}
 
 	return entry

@@ -107,7 +107,7 @@ func (h *StatsHandler) GetErrorStats(c *gin.Context) {
 			groups[key] = &ErrorGroup{
 				Key:         key,
 				Count:       0,
-				LastSeen:    log.Timestamp.Time().Format("2006-01-02 15:04:05"),
+				LastSeen:    log.Timestamp.Format("2006-01-02 15:04:05"),
 				SampleError: log.Message,
 				Package:     log.Package,
 			}
@@ -115,7 +115,7 @@ func (h *StatsHandler) GetErrorStats(c *gin.Context) {
 
 		g := groups[key]
 		g.Count++
-		logTime := log.Timestamp.Time().Format("2006-01-02 15:04:05")
+		logTime := log.Timestamp.Format("2006-01-02 15:04:05")
 		if logTime > g.LastSeen {
 			g.LastSeen = logTime
 			g.SampleError = log.Message
@@ -243,7 +243,7 @@ func (h *StatsHandler) GetErrorTrend(c *gin.Context) {
 	// 按时间段聚合
 	buckets := make(map[string]int)
 	for _, log := range logs {
-		bucketTime := log.Timestamp.Time().Truncate(intervalDuration)
+		bucketTime := log.Timestamp.Truncate(intervalDuration)
 		key := bucketTime.Format("2006-01-02 15:04")
 		buckets[key]++
 	}

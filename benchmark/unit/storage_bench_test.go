@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/loglite/loglite/internal/model"
+	"github.com/loglite/loglite/pkg/sdk/sender"
 	"github.com/loglite/loglite/internal/storage"
 )
 
@@ -21,11 +21,11 @@ func BenchmarkStorage_Write(b *testing.B) {
 	defer store.Close()
 
 	// ✅ 修复：正确生成 ID
-	logs := make([]*model.LogEntry, b.N)
+	logs := make([]*sender.LogEntry, b.N)
 	for i := 0; i < b.N; i++ {
-		logs[i] = &model.LogEntry{
+		logs[i] = &sender.LogEntry{
 			ID:        fmt.Sprintf("test-%d", i),
-			Timestamp: model.JSONTime(time.Now()),
+			Timestamp: time.Time(time.Now()),
 			Message:   "测试日志消息",
 			Level:     "info",
 			Service:   "test-service",
@@ -66,11 +66,11 @@ func BenchmarkStorage_BatchWrite(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < batchCount; i++ {
-		logs := make([]*model.LogEntry, batchSize)
+		logs := make([]*sender.LogEntry, batchSize)
 		for j := 0; j < batchSize; j++ {
-			logs[j] = &model.LogEntry{
+			logs[j] = &sender.LogEntry{
 						ID:        fmt.Sprintf("batch-%d-%d", i, j),
-				Timestamp: model.JSONTime(time.Now()),
+				Timestamp: time.Time(time.Now()),
 				Message:   "批量测试日志",
 				Level:     "info",
 				Service:   "test-service",
@@ -103,9 +103,9 @@ func BenchmarkStorage_Read(b *testing.B) {
 	for i := 0; i < dataSize; i++ {
 		key := fmt.Sprintf("read-test-%d", i)
 		keys[i] = key
-		log := &model.LogEntry{
+		log := &sender.LogEntry{
 			ID:        key,
-			Timestamp: model.JSONTime(time.Now()),
+			Timestamp: time.Time(time.Now()),
 			Message:   "读取测试日志",
 			Level:     "info",
 			Service:   "test-service",
@@ -140,9 +140,9 @@ func BenchmarkStorage_QueryByTime(b *testing.B) {
 	const dataSize = 10000
 	baseTime := time.Now().Add(-24 * time.Hour)
 	for i := 0; i < dataSize; i++ {
-		log := &model.LogEntry{
+		log := &sender.LogEntry{
 			ID:        fmt.Sprintf("query-test-%d", i),
-			Timestamp: model.JSONTime(baseTime.Add(time.Duration(i) * time.Second)),
+			Timestamp: time.Time(baseTime.Add(time.Duration(i) * time.Second)),
 			Message:   "查询测试日志",
 			Level:     "info",
 			Service:   "test-service",
@@ -201,9 +201,9 @@ func BenchmarkStorage_QueryByService(b *testing.B) {
 	// 写入多个服务的数据
 	services := []string{"user-service", "order-service", "payment-service"}
 	for i := 0; i < 10000; i++ {
-		log := &model.LogEntry{
+		log := &sender.LogEntry{
 			ID:        fmt.Sprintf("service-test-%d", i),
-			Timestamp: model.JSONTime(time.Now()),
+			Timestamp: time.Time(time.Now()),
 			Message:   "服务测试日志",
 			Level:     "info",
 			Service:   services[i%len(services)],
@@ -244,9 +244,9 @@ func BenchmarkStorage_QueryByLevel(b *testing.B) {
 	// 写入不同级别的日志
 	levels := []string{"debug", "info", "warn", "error"}
 	for i := 0; i < 10000; i++ {
-		log := &model.LogEntry{
+		log := &sender.LogEntry{
 			ID:        fmt.Sprintf("level-test-%d", i),
-			Timestamp: model.JSONTime(time.Now()),
+			Timestamp: time.Time(time.Now()),
 			Message:   "级别测试日志",
 			Level:     levels[i%len(levels)],
 			Service:   "test-service",
@@ -290,9 +290,9 @@ func BenchmarkStorage_ConcurrentWrite(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
-			log := &model.LogEntry{
+			log := &sender.LogEntry{
 				ID:        fmt.Sprintf("concurrent-%d-%d", b.N, i),
-				Timestamp: model.JSONTime(time.Now()),
+				Timestamp: time.Time(time.Now()),
 				Message:   "并发写入测试",
 				Level:     "info",
 				Service:   "test-service",
