@@ -2,11 +2,14 @@ package api
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/loglite/loglite/internal/monitor"
 	"github.com/loglite/loglite/internal/storage"
 )
 
 // TailHub 全局实例
 var globalTailHub *TailHub
+var globalMonitor *monitor.Monitor
+var globalHealthChecker *monitor.HealthChecker
 
 // SetupRouter 设置路由
 func SetupRouter(store *storage.BadgerStore) *gin.Engine {
@@ -16,6 +19,11 @@ func SetupRouter(store *storage.BadgerStore) *gin.Engine {
 	r.Use(gin.Recovery())
 	r.Use(corsMiddleware())
 
+	// 初始化监控
+	globalMonitor = monitor.NewMonitor(store)
+	globalHealthChecker = monitor.NewHealthChecker(store)
+	monitorHandler := monitor.NewMonitorHandler(globalMonitor, globalHealthChecker)
+
 	handler := NewHandler(store)
 	statsHandler := NewStatsHandler(store)
 
@@ -23,8 +31,11 @@ func SetupRouter(store *storage.BadgerStore) *gin.Engine {
 	globalTailHub = NewTailHub()
 	tailHandler := NewTailHandler(globalTailHub)
 
-	// 健康检查
-	r.GET("/health", handler.Health)
+	// 健康检查（使用监控的健康检查）
+	r.GET("/health", func(c *gin.Context) {
+		health := monitorHandler.GetHealth()
+		c.JSON(200, health)
+	})
 
 	// API v1
 	v1 := r.Group("/api/v1")
@@ -44,11 +55,32 @@ func SetupRouter(store *storage.BadgerStore) *gin.Engine {
 		v1.GET("/stats", handler.GetStats)
 		v1.GET("/stats/errors", statsHandler.GetErrorStats)
 		v1.GET("/stats/errors/trend", statsHandler.GetErrorTrend)
+
+		// 监控
+		v1.GET("/metrics", func(c *gin.Context) {
+			metrics := monitorHandler.GetMetrics()
+			c.JSON(200, gin.H{
+				"code":    200,
+				"message": "success",
+				"data":    metrics,
+			})
+		})
+		
+		// 健康检查（API v1 版本）
+		v1.GET("/health", func(c *gin.Context) {
+			health := monitorHandler.GetHealth()
+			c.JSON(200, gin.H{
+				"code":    200,
+				"message": "success",
+				"data":    health,
+			})
+		})
 	}
 
 	// Web UI (静态文件)
 	r.GET("/", serveIndex)
 	r.GET("/errors", serveErrors)
+	r.GET("/monitor", serveMonitor)
 	r.Static("/static", "./web/static")
 
 	return r
@@ -85,4 +117,15 @@ func serveIndex(c *gin.Context) {
 func serveErrors(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.File("./web/templates/errors.html")
+}
+
+// serveMonitor 提供监控页面
+func serveMonitor(c *gin.Context) {
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.File("./web/templates/monitor.html")
+}
+
+// GetMonitor 获取 Monitor 实例（用于记录指标）
+func GetMonitor() *monitor.Monitor {
+	return globalMonitor
 }

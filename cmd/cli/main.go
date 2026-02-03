@@ -41,6 +41,8 @@ func main() {
 		handleStats(args)
 	case "send":
 		handleSend(args)
+	case "clear":
+		handleClear(args)
 	case "version", "-v", "--version":
 		fmt.Printf("loglite-cli %s\n", version)
 	case "help", "-h", "--help":
@@ -62,6 +64,7 @@ func printHelp() {
   tail, t     实时查看日志
   stats, s    查看统计信息
   send        发送日志
+  clear       清空数据库（危险操作！）
   version     显示版本
   help        显示帮助
 
@@ -299,6 +302,89 @@ func handleSend(args []string) {
 	} else {
 		fmt.Fprintf(os.Stderr, "发送失败: %v\n", result["message"])
 	}
+}
+
+func handleClear(args []string) {
+	// 检查是否需要确认
+	force := false
+	for _, arg := range args {
+		if arg == "--force" || arg == "-f" {
+			force = true
+			break
+		}
+	}
+	
+	if !force {
+		fmt.Println("⚠️  警告：此操作将清空所有日志数据，不可恢复！")
+		fmt.Print("请输入 'yes' 确认: ")
+		
+		var confirm string
+		fmt.Scanln(&confirm)
+		if confirm != "yes" {
+			fmt.Println("已取消")
+			return
+		}
+	}
+	
+	// 读取配置
+	configPath := "config.yaml"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") && args[0] != "--force" && args[0] != "-f" {
+		configPath = args[0]
+	}
+	
+	// 加载配置获取数据目录
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
+		os.Exit(1)
+	}
+	
+	dataDir := cfg.Storage.DataDir
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+	
+	fmt.Printf("正在清空数据库: %s\n", dataDir)
+	
+	// 检查目录是否存在
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		fmt.Printf("数据目录不存在: %s\n", dataDir)
+		return
+	}
+	
+	// 删除数据目录
+	if err := os.RemoveAll(dataDir); err != nil {
+		fmt.Fprintf(os.Stderr, "清空失败: %v\n", err)
+		os.Exit(1)
+	}
+	
+	// 重新创建目录
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "创建目录失败: %v\n", err)
+		os.Exit(1)
+	}
+	
+	fmt.Println("✅ 数据库已清空")
+}
+
+func loadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	
+	var cfg Config
+	if err := sonic.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	
+	return &cfg, nil
+}
+
+type Config struct {
+	Storage struct {
+		DataDir string `yaml:"data_dir" json:"data_dir"`
+	} `yaml:"storage" json:"storage"`
 }
 
 func printLog(log map[string]interface{}) {

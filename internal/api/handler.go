@@ -25,8 +25,13 @@ func NewHandler(store *storage.BadgerStore) *Handler {
 // ReceiveLog 接收单条日志
 // POST /api/v1/logs
 func (h *Handler) ReceiveLog(c *gin.Context) {
+	startTime := time.Now()
+	
 	var entry model.LogEntry
 	if err := c.ShouldBindJSON(&entry); err != nil {
+		if m := GetMonitor(); m != nil {
+			m.IncrRequestError()
+		}
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
 			"message": "invalid request body",
@@ -42,6 +47,9 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 
 	// 验证
 	if err := entry.Validate(); err != nil {
+		if m := GetMonitor(); m != nil {
+			m.IncrRequestError()
+		}
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
 			"message": err.Error(),
@@ -52,8 +60,19 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 	// 设置接收时间
 	entry.ReceivedAt = time.Now()
 
+	// 记录接收延迟
+	ingestLatency := time.Since(startTime)
+	if m := GetMonitor(); m != nil {
+		m.IncrLogReceived(1)
+		m.RecordIngestLatency(ingestLatency)
+	}
+
 	// 保存
+	saveStart := time.Now()
 	if err := h.store.Save(&entry); err != nil {
+		if m := GetMonitor(); m != nil {
+			m.IncrRequestError()
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": "failed to save log",
@@ -61,10 +80,20 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 		})
 		return
 	}
+	
+	// 记录存储延迟
+	if m := GetMonitor(); m != nil {
+		m.IncrLogStored(1)
+		m.RecordStorageLatency(time.Since(saveStart))
+	}
 
 	// 广播到实时流
 	if hub := GetTailHub(); hub != nil {
 		hub.Broadcast(&entry)
+	}
+
+	if m := GetMonitor(); m != nil {
+		m.IncrRequestTotal()
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -79,11 +108,16 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 // ReceiveBatch 批量接收日志
 // POST /api/v1/logs/batch
 func (h *Handler) ReceiveBatch(c *gin.Context) {
+	startTime := time.Now()
+	
 	var req struct {
 		Logs []*model.LogEntry `json:"logs"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if m := GetMonitor(); m != nil {
+			m.IncrRequestError()
+		}
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
 			"message": "invalid request body",
@@ -93,6 +127,9 @@ func (h *Handler) ReceiveBatch(c *gin.Context) {
 	}
 
 	if len(req.Logs) == 0 {
+		if m := GetMonitor(); m != nil {
+			m.IncrRequestError()
+		}
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
 			"message": "logs array is empty",
@@ -110,8 +147,19 @@ func (h *Handler) ReceiveBatch(c *gin.Context) {
 		entry.ReceivedAt = now
 	}
 
+	// 记录接收延迟
+	ingestLatency := time.Since(startTime)
+	if m := GetMonitor(); m != nil {
+		m.IncrLogReceived(int64(len(req.Logs)))
+		m.RecordIngestLatency(ingestLatency)
+	}
+
 	// 批量保存
+	saveStart := time.Now()
 	if err := h.store.SaveBatch(req.Logs); err != nil {
+		if m := GetMonitor(); m != nil {
+			m.IncrRequestError()
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": "failed to save logs",
@@ -119,12 +167,22 @@ func (h *Handler) ReceiveBatch(c *gin.Context) {
 		})
 		return
 	}
+	
+	// 记录存储延迟
+	if m := GetMonitor(); m != nil {
+		m.IncrLogStored(int64(len(req.Logs)))
+		m.RecordStorageLatency(time.Since(saveStart))
+	}
 
 	// 广播到实时流
 	if hub := GetTailHub(); hub != nil {
 		for _, entry := range req.Logs {
 			hub.Broadcast(entry)
 		}
+	}
+
+	if m := GetMonitor(); m != nil {
+		m.IncrRequestTotal()
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -139,6 +197,8 @@ func (h *Handler) ReceiveBatch(c *gin.Context) {
 // QueryLogs 查询日志
 // GET /api/v1/query
 func (h *Handler) QueryLogs(c *gin.Context) {
+	queryStart := time.Now()
+	
 	var params storage.QueryParams
 
 	// 检查是否是自然语言查询
@@ -194,12 +254,21 @@ func (h *Handler) QueryLogs(c *gin.Context) {
 	// 查询
 	logs, total, err := h.store.Query(params)
 	if err != nil {
+		if m := GetMonitor(); m != nil {
+			m.IncrRequestError()
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": "query failed",
 			"error":   err.Error(),
 		})
 		return
+	}
+	
+	// 记录查询延迟
+	if m := GetMonitor(); m != nil {
+		m.RecordQueryLatency(time.Since(queryStart))
+		m.IncrRequestTotal()
 	}
 
 	// 构建响应（包含解析后的查询参数，方便调试）

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -152,14 +153,14 @@ func (s *BadgerStore) Query(params QueryParams) ([]*model.LogEntry, int, error) 
 
 			// 解析时间
 			entryTime := s.parseTimeFromKey(key)
+
+			// 时间过滤：如果记录早于 StartTime，且是反向遍历，可以停止（因为更早的记录也不会符合）
 			if !params.StartTime.IsZero() && entryTime.Before(params.StartTime) {
-				// 模糊匹配时不能 break，因为不是按服务分组的
-				if len(prefix) > 0 {
-					break
-				}
-				it.Next()
-				continue
+				// 反向遍历时，如果遇到早于 StartTime 的记录，可以停止
+				// 因为 opts.Reverse = true，所以更早的记录都在后面，不会符合条件
+				break
 			}
+			// 如果记录晚于 EndTime，继续遍历（因为反向遍历，更早的记录可能符合）
 			if !params.EndTime.IsZero() && entryTime.After(params.EndTime) {
 				it.Next()
 				continue
@@ -207,7 +208,11 @@ func (s *BadgerStore) Query(params QueryParams) ([]*model.LogEntry, int, error) 
 				it.Next()
 				continue
 			}
+
+			// 如果已经达到 limit，停止遍历（但 total 已经计数了）
 			if params.Limit > 0 && len(results) >= params.Limit {
+				// 继续遍历以统计 total，但不添加到 results
+				// 注意：这里不能 break，因为需要统计所有符合条件的记录
 				it.Next()
 				continue
 			}
@@ -308,6 +313,40 @@ func (s *BadgerStore) GetStats() (*Stats, error) {
 // Close 关闭存储
 func (s *BadgerStore) Close() error {
 	return s.db.Close()
+}
+
+// Clear 清空所有数据
+// 警告：此操作会删除所有日志数据，不可恢复！
+func (s *BadgerStore) Clear() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 关闭数据库
+	if err := s.db.Close(); err != nil {
+		return fmt.Errorf("failed to close db: %w", err)
+	}
+
+	// 删除所有数据文件
+	if err := os.RemoveAll(s.dataDir); err != nil {
+		return fmt.Errorf("failed to remove data directory: %w", err)
+	}
+
+	// 重新创建目录
+	if err := os.MkdirAll(s.dataDir, 0755); err != nil {
+		return fmt.Errorf("failed to recreate data directory: %w", err)
+	}
+
+	// 重新打开数据库
+	opts := badger.DefaultOptions(s.dataDir)
+	opts.Logger = nil
+	db, err := badger.Open(opts)
+	if err != nil {
+		return fmt.Errorf("failed to reopen db: %w", err)
+	}
+
+	s.db = db
+
+	return nil
 }
 
 // buildKey 构建存储 key
