@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,7 @@ import (
 
 // Monitor 监控管理器
 type Monitor struct {
-	store   *storage.BadgerStore
+	store   storage.Store
 	metrics *Metrics
 	mu      sync.RWMutex
 
@@ -71,7 +72,7 @@ type Metrics struct {
 }
 
 // NewMonitor 创建监控管理器
-func NewMonitor(store *storage.BadgerStore) *Monitor {
+func NewMonitor(store storage.Store) *Monitor {
 	m := &Monitor{
 		store: store,
 		metrics: &Metrics{
@@ -108,8 +109,8 @@ func (m *Monitor) GetMetrics() *Metrics {
 
 	// 实时收集数据库指标
 	if m.store != nil {
-		if stats, err := m.store.GetStats(); err == nil {
-			m.metrics.BadgerSize = stats.StorageSize
+		if stats, err := m.store.Stats(context.Background()); err == nil {
+			m.metrics.BadgerSize = stats.TotalSize
 		}
 	}
 
@@ -247,7 +248,7 @@ func (m *Monitor) collectDatabaseMetrics() {
 		return
 	}
 
-	stats, err := m.store.GetStats()
+	stats, err := m.store.Stats(context.Background())
 	if err != nil {
 		return
 	}
@@ -255,7 +256,7 @@ func (m *Monitor) collectDatabaseMetrics() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.metrics.BadgerSize = stats.StorageSize
+	m.metrics.BadgerSize = stats.TotalSize
 	m.metrics.CacheHitRate = 0.0 // BadgerDB 没有直接提供缓存命中率
 }
 
@@ -279,16 +280,16 @@ func (m *Monitor) collectTimeWindowMetrics() {
 
 	for _, w := range windows {
 		startTime := now.Add(-w.duration)
-		params := storage.QueryParams{
-			StartTime: startTime,
-			EndTime:   now,
-			Limit:     10000,
+		params := storage.Query{
+			From:  startTime,
+			To:    now,
+			Limit: 1000,
 		}
 
-		_, count, err := m.store.Query(params)
+		result, err := m.store.Query(context.Background(), &params)
 		if err == nil {
 			m.mu.Lock()
-			*w.target = int64(count)
+			*w.target = int64(result.Total)
 			m.mu.Unlock()
 		}
 	}
@@ -315,11 +316,11 @@ type CheckResult struct {
 // HealthChecker 健康检查器
 type HealthChecker struct {
 	startTime time.Time
-	store     *storage.BadgerStore
+	store     storage.Store
 }
 
 // NewHealthChecker 创建健康检查器
-func NewHealthChecker(store *storage.BadgerStore) *HealthChecker {
+func NewHealthChecker(store storage.Store) *HealthChecker {
 	return &HealthChecker{
 		startTime: time.Now(),
 		store:     store,
@@ -336,7 +337,14 @@ func (h *HealthChecker) Check() *HealthStatus {
 	}
 
 	// 检查数据库连接
-	status.Checks["database"] = h.checkDatabase(h.store)
+	if h.store != nil {
+		status.Checks["database"] = h.checkDatabase(h.store)
+	} else {
+		status.Checks["database"] = CheckResult{
+			Status:  "fail",
+			Message: "database store is nil",
+		}
+	}
 
 	// 检查磁盘空间
 	status.Checks["disk"] = h.checkDisk()
@@ -366,7 +374,7 @@ func (h *HealthChecker) Check() *HealthStatus {
 }
 
 // checkDatabase 检查数据库
-func (h *HealthChecker) checkDatabase(store *storage.BadgerStore) CheckResult {
+func (h *HealthChecker) checkDatabase(store storage.Store) CheckResult {
 	if store == nil {
 		return CheckResult{
 			Status:  "fail",
@@ -375,7 +383,7 @@ func (h *HealthChecker) checkDatabase(store *storage.BadgerStore) CheckResult {
 	}
 
 	// 尝试获取统计信息来验证连接
-	_, err := store.GetStats()
+	_, err := store.Stats(context.Background())
 	if err != nil {
 		return CheckResult{
 			Status:  "fail",

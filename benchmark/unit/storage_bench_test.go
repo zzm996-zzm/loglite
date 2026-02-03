@@ -2,30 +2,38 @@
 package unit
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/loglite/loglite/pkg/sdk/sender"
 	"github.com/loglite/loglite/internal/storage"
+	"github.com/loglite/loglite/pkg/sdk/sender"
 )
 
 // BenchmarkStorage_Write 测试存储写入性能
 func BenchmarkStorage_Write(b *testing.B) {
 	tempDir := b.TempDir()
 
-	store, err := storage.NewBadgerStore(tempDir, 168*time.Hour)
+	store, err := storage.NewBadger(
+		tempDir,
+		storage.WithConfig(storage.Config{
+			"ttl": 168 * time.Hour,
+		}),
+	)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer store.Close()
+
+	ctx := context.Background()
 
 	// ✅ 修复：正确生成 ID
 	logs := make([]*sender.LogEntry, b.N)
 	for i := 0; i < b.N; i++ {
 		logs[i] = &sender.LogEntry{
 			ID:        fmt.Sprintf("test-%d", i),
-			Timestamp: time.Time(time.Now()),
+			Timestamp: time.Now(),
 			Message:   "测试日志消息",
 			Level:     "info",
 			Service:   "test-service",
@@ -36,7 +44,7 @@ func BenchmarkStorage_Write(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		if err := store.Save(logs[i]); err != nil {
+		if err := store.Write(ctx, logs[i]); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -46,39 +54,46 @@ func BenchmarkStorage_Write(b *testing.B) {
 func BenchmarkStorage_BatchWrite(b *testing.B) {
 	tempDir := b.TempDir()
 
-	store, err := storage.NewBadgerStore(tempDir, 168*time.Hour)
+	store, err := storage.NewBadger(
+		tempDir,
+		storage.WithConfig(storage.Config{
+			"ttl": 168 * time.Hour,
+		}),
+	)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer store.Close()
+
+	ctx := context.Background()
 
 	// 测试不同的批量大小
 	batchSizes := []int{10, 50, 100, 500, 1000}
 
 	for _, batchSize := range batchSizes {
 		b.Run(fmt.Sprintf("BatchSize_%d", batchSize), func(b *testing.B) {
-	batchCount := b.N / batchSize
-	if batchCount == 0 {
-		batchCount = 1
-	}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < batchCount; i++ {
-		logs := make([]*sender.LogEntry, batchSize)
-		for j := 0; j < batchSize; j++ {
-			logs[j] = &sender.LogEntry{
-						ID:        fmt.Sprintf("batch-%d-%d", i, j),
-				Timestamp: time.Time(time.Now()),
-				Message:   "批量测试日志",
-				Level:     "info",
-				Service:   "test-service",
+			batchCount := b.N / batchSize
+			if batchCount == 0 {
+				batchCount = 1
 			}
-		}
-		if err := store.SaveBatch(logs); err != nil {
-			b.Fatal(err)
-		}
+
+			b.ResetTimer()
+			b.ReportAllocs()
+
+			for i := 0; i < batchCount; i++ {
+				logs := make([]*sender.LogEntry, batchSize)
+				for j := 0; j < batchSize; j++ {
+					logs[j] = &sender.LogEntry{
+						ID:        fmt.Sprintf("batch-%d-%d", i, j),
+						Timestamp: time.Now(),
+						Message:   "批量测试日志",
+						Level:     "info",
+						Service:   "test-service",
+					}
+				}
+				if err := store.WriteMany(ctx, logs); err != nil {
+					b.Fatal(err)
+				}
 			}
 
 			// 报告吞吐量
@@ -91,11 +106,18 @@ func BenchmarkStorage_BatchWrite(b *testing.B) {
 func BenchmarkStorage_Read(b *testing.B) {
 	tempDir := b.TempDir()
 
-	store, err := storage.NewBadgerStore(tempDir, 168*time.Hour)
+	store, err := storage.NewBadger(
+		tempDir,
+		storage.WithConfig(storage.Config{
+			"ttl": 168 * time.Hour,
+		}),
+	)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer store.Close()
+
+	ctx := context.Background()
 
 	// 先写入测试数据
 	const dataSize = 10000
@@ -105,12 +127,12 @@ func BenchmarkStorage_Read(b *testing.B) {
 		keys[i] = key
 		log := &sender.LogEntry{
 			ID:        key,
-			Timestamp: time.Time(time.Now()),
+			Timestamp: time.Now(),
 			Message:   "读取测试日志",
 			Level:     "info",
 			Service:   "test-service",
 		}
-		if err := store.Save(log); err != nil {
+		if err := store.Write(ctx, log); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -119,7 +141,7 @@ func BenchmarkStorage_Read(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		_, err := store.GetByID(keys[i%dataSize])
+		_, err := store.Get(ctx, keys[i%dataSize])
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -130,11 +152,18 @@ func BenchmarkStorage_Read(b *testing.B) {
 func BenchmarkStorage_QueryByTime(b *testing.B) {
 	tempDir := b.TempDir()
 
-	store, err := storage.NewBadgerStore(tempDir, 168*time.Hour)
+	store, err := storage.NewBadger(
+		tempDir,
+		storage.WithConfig(storage.Config{
+			"ttl": 168 * time.Hour,
+		}),
+	)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer store.Close()
+
+	ctx := context.Background()
 
 	// 写入大量测试数据
 	const dataSize = 10000
@@ -142,12 +171,12 @@ func BenchmarkStorage_QueryByTime(b *testing.B) {
 	for i := 0; i < dataSize; i++ {
 		log := &sender.LogEntry{
 			ID:        fmt.Sprintf("query-test-%d", i),
-			Timestamp: time.Time(baseTime.Add(time.Duration(i) * time.Second)),
+			Timestamp: baseTime.Add(time.Duration(i) * time.Second),
 			Message:   "查询测试日志",
 			Level:     "info",
 			Service:   "test-service",
 		}
-		if err := store.Save(log); err != nil {
+		if err := store.Write(ctx, log); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -173,16 +202,16 @@ func BenchmarkStorage_QueryByTime(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				logs, _, err := store.Query(storage.QueryParams{
-					StartTime: startTime,
-					EndTime:   endTime,
-					Limit:     tt.limit,
+				result, err := store.Query(ctx, &storage.Query{
+					From:  startTime,
+					To:    endTime,
+					Limit: tt.limit,
 				})
 				if err != nil {
 					b.Fatal(err)
 				}
 				// 防止编译器优化掉查询
-				_ = logs
+				_ = result.Entries
 			}
 		})
 	}
@@ -192,23 +221,30 @@ func BenchmarkStorage_QueryByTime(b *testing.B) {
 func BenchmarkStorage_QueryByService(b *testing.B) {
 	tempDir := b.TempDir()
 
-	store, err := storage.NewBadgerStore(tempDir, 168*time.Hour)
+	store, err := storage.NewBadger(
+		tempDir,
+		storage.WithConfig(storage.Config{
+			"ttl": 168 * time.Hour,
+		}),
+	)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer store.Close()
+
+	ctx := context.Background()
 
 	// 写入多个服务的数据
 	services := []string{"user-service", "order-service", "payment-service"}
 	for i := 0; i < 10000; i++ {
 		log := &sender.LogEntry{
 			ID:        fmt.Sprintf("service-test-%d", i),
-			Timestamp: time.Time(time.Now()),
+			Timestamp: time.Now(),
 			Message:   "服务测试日志",
 			Level:     "info",
 			Service:   services[i%len(services)],
 		}
-		if err := store.Save(log); err != nil {
+		if err := store.Write(ctx, log); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -218,16 +254,16 @@ func BenchmarkStorage_QueryByService(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		service := services[i%len(services)]
-		logs, _, err := store.Query(storage.QueryParams{
-			Service:   service,
-			StartTime: time.Now().Add(-24 * time.Hour),
-			EndTime:   time.Now(),
-			Limit:     100,
+		result, err := store.Query(ctx, &storage.Query{
+			Services: []string{service},
+			From:     time.Now().Add(-24 * time.Hour),
+			To:       time.Now(),
+			Limit:    100,
 		})
 		if err != nil {
 			b.Fatal(err)
 		}
-		_ = logs
+		_ = result.Entries
 	}
 }
 
@@ -235,23 +271,30 @@ func BenchmarkStorage_QueryByService(b *testing.B) {
 func BenchmarkStorage_QueryByLevel(b *testing.B) {
 	tempDir := b.TempDir()
 
-	store, err := storage.NewBadgerStore(tempDir, 168*time.Hour)
+	store, err := storage.NewBadger(
+		tempDir,
+		storage.WithConfig(storage.Config{
+			"ttl": 168 * time.Hour,
+		}),
+	)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer store.Close()
+
+	ctx := context.Background()
 
 	// 写入不同级别的日志
 	levels := []string{"debug", "info", "warn", "error"}
 	for i := 0; i < 10000; i++ {
 		log := &sender.LogEntry{
 			ID:        fmt.Sprintf("level-test-%d", i),
-			Timestamp: time.Time(time.Now()),
+			Timestamp: time.Now(),
 			Message:   "级别测试日志",
 			Level:     levels[i%len(levels)],
 			Service:   "test-service",
 		}
-		if err := store.Save(log); err != nil {
+		if err := store.Write(ctx, log); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -261,16 +304,16 @@ func BenchmarkStorage_QueryByLevel(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		level := levels[i%len(levels)]
-		logs, _, err := store.Query(storage.QueryParams{
-			Level:     level,
-			StartTime: time.Now().Add(-24 * time.Hour),
-			EndTime:   time.Now(),
-			Limit:     100,
+		result, err := store.Query(ctx, &storage.Query{
+			Levels: []string{level},
+			From:   time.Now().Add(-24 * time.Hour),
+			To:     time.Now(),
+			Limit:  100,
 		})
 		if err != nil {
 			b.Fatal(err)
 		}
-		_ = logs
+		_ = result.Entries
 	}
 }
 
@@ -278,11 +321,18 @@ func BenchmarkStorage_QueryByLevel(b *testing.B) {
 func BenchmarkStorage_ConcurrentWrite(b *testing.B) {
 	tempDir := b.TempDir()
 
-	store, err := storage.NewBadgerStore(tempDir, 168*time.Hour)
+	store, err := storage.NewBadger(
+		tempDir,
+		storage.WithConfig(storage.Config{
+			"ttl": 168 * time.Hour,
+		}),
+	)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer store.Close()
+
+	ctx := context.Background()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -292,12 +342,12 @@ func BenchmarkStorage_ConcurrentWrite(b *testing.B) {
 		for pb.Next() {
 			log := &sender.LogEntry{
 				ID:        fmt.Sprintf("concurrent-%d-%d", b.N, i),
-				Timestamp: time.Time(time.Now()),
+				Timestamp: time.Now(),
 				Message:   "并发写入测试",
 				Level:     "info",
 				Service:   "test-service",
 			}
-			if err := store.Save(log); err != nil {
+			if err := store.Write(ctx, log); err != nil {
 				b.Fatal(err)
 			}
 			i++

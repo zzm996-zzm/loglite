@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -14,11 +15,11 @@ import (
 
 // Handler API 处理器
 type Handler struct {
-	store *storage.BadgerStore
+	store storage.Store
 }
 
 // NewHandler 创建处理器
-func NewHandler(store *storage.BadgerStore) *Handler {
+func NewHandler(store storage.Store) *Handler {
 	return &Handler{store: store}
 }
 
@@ -26,7 +27,7 @@ func NewHandler(store *storage.BadgerStore) *Handler {
 // POST /api/v1/logs
 func (h *Handler) ReceiveLog(c *gin.Context) {
 	startTime := time.Now()
-	
+
 	var entry model.LogEntry
 	if err := c.ShouldBindJSON(&entry); err != nil {
 		if m := GetMonitor(); m != nil {
@@ -69,7 +70,7 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 
 	// 保存
 	saveStart := time.Now()
-	if err := h.store.Save(&entry); err != nil {
+	if err := h.store.Write(context.Background(), &entry); err != nil {
 		if m := GetMonitor(); m != nil {
 			m.IncrRequestError()
 		}
@@ -80,7 +81,7 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 记录存储延迟
 	if m := GetMonitor(); m != nil {
 		m.IncrLogStored(1)
@@ -109,7 +110,7 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 // POST /api/v1/logs/batch
 func (h *Handler) ReceiveBatch(c *gin.Context) {
 	startTime := time.Now()
-	
+
 	var req struct {
 		Logs []*model.LogEntry `json:"logs"`
 	}
@@ -156,7 +157,7 @@ func (h *Handler) ReceiveBatch(c *gin.Context) {
 
 	// 批量保存
 	saveStart := time.Now()
-	if err := h.store.SaveBatch(req.Logs); err != nil {
+	if err := h.store.WriteMany(context.Background(), req.Logs); err != nil {
 		if m := GetMonitor(); m != nil {
 			m.IncrRequestError()
 		}
@@ -167,7 +168,7 @@ func (h *Handler) ReceiveBatch(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 记录存储延迟
 	if m := GetMonitor(); m != nil {
 		m.IncrLogStored(int64(len(req.Logs)))
@@ -198,61 +199,62 @@ func (h *Handler) ReceiveBatch(c *gin.Context) {
 // GET /api/v1/query
 func (h *Handler) QueryLogs(c *gin.Context) {
 	queryStart := time.Now()
-	
-	var params storage.QueryParams
+
+	var qry storage.Query
 
 	// 检查是否是自然语言查询
 	q := c.Query("q")
 	if q != "" && c.Query("service") == "" && c.Query("level") == "" && c.Query("start") == "" {
 		// 自然语言查询
 		parser := query.NewNaturalQueryParser()
-		params = parser.Parse(q)
-		// 自然语言查询的服务名使用模糊匹配
-		if params.Service != "" {
-			params.ServiceFuzzy = true
-		}
+		parsedQuery := parser.Parse(q)
 		// 如果解析后没有关键词，保留原始查询
-		if params.Keyword == "" && params.Level == "" && params.Service == "" {
-			params.Keyword = q
+		if len(parsedQuery.Keywords) == 0 && len(parsedQuery.Levels) == 0 && len(parsedQuery.Services) == 0 {
+			parsedQuery.Keywords = []string{q}
 		}
+		qry = *parsedQuery
 	} else {
 		// 结构化查询
-		params = storage.QueryParams{
-			Service: c.Query("service"),
-			Level:   c.Query("level"),
-			Keyword: q,
+		if service := c.Query("service"); service != "" {
+			qry.Services = []string{service}
+		}
+		if level := c.Query("level"); level != "" {
+			qry.Levels = []string{level}
+		}
+		if q != "" {
+			qry.Keywords = []string{q}
 		}
 
 		// 解析时间范围（支持多种格式）
 		if start := c.Query("start"); start != "" {
-			params.StartTime = parseTime(start)
+			qry.From = parseTime(start)
 		}
 		if end := c.Query("end"); end != "" {
-			params.EndTime = parseTime(end)
+			qry.To = parseTime(end)
 		}
 	}
 
 	// 解析分页
 	if limit := c.Query("limit"); limit != "" {
 		if l, err := strconv.Atoi(limit); err == nil && l > 0 {
-			params.Limit = l
+			qry.Limit = l
 		}
 	}
-	if params.Limit == 0 {
-		params.Limit = 100
+	if qry.Limit == 0 {
+		qry.Limit = 100
 	}
-	if params.Limit > 1000 {
-		params.Limit = 1000
+	if qry.Limit > 1000 {
+		qry.Limit = 1000
 	}
 
 	if offset := c.Query("offset"); offset != "" {
 		if o, err := strconv.Atoi(offset); err == nil && o >= 0 {
-			params.Offset = o
+			qry.Offset = o
 		}
 	}
 
 	// 查询
-	logs, total, err := h.store.Query(params)
+	result, err := h.store.Query(context.Background(), &qry)
 	if err != nil {
 		if m := GetMonitor(); m != nil {
 			m.IncrRequestError()
@@ -264,7 +266,7 @@ func (h *Handler) QueryLogs(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 记录查询延迟
 	if m := GetMonitor(); m != nil {
 		m.RecordQueryLatency(time.Since(queryStart))
@@ -273,20 +275,32 @@ func (h *Handler) QueryLogs(c *gin.Context) {
 
 	// 构建响应（包含解析后的查询参数，方便调试）
 	response := gin.H{
-		"logs":   logs,
-		"total":  total,
-		"limit":  params.Limit,
-		"offset": params.Offset,
+		"logs":   result.Entries,
+		"total":  result.Total,
+		"limit":  qry.Limit,
+		"offset": qry.Offset,
 	}
 
 	// 如果是自然语言查询，返回解析结果
 	if c.Query("debug") == "1" || c.Query("debug") == "true" {
+		level := ""
+		if len(qry.Levels) > 0 {
+			level = qry.Levels[0]
+		}
+		service := ""
+		if len(qry.Services) > 0 {
+			service = qry.Services[0]
+		}
+		keyword := ""
+		if len(qry.Keywords) > 0 {
+			keyword = qry.Keywords[0]
+		}
 		response["parsed"] = gin.H{
-			"level":      params.Level,
-			"service":    params.Service,
-			"keyword":    params.Keyword,
-			"start_time": params.StartTime.Format("2006-01-02 15:04:05"),
-			"end_time":   params.EndTime.Format("2006-01-02 15:04:05"),
+			"level":      level,
+			"service":    service,
+			"keyword":    keyword,
+			"start_time": qry.From.Format("2006-01-02 15:04:05"),
+			"end_time":   qry.To.Format("2006-01-02 15:04:05"),
 		}
 	}
 
@@ -309,7 +323,7 @@ func (h *Handler) GetLog(c *gin.Context) {
 		return
 	}
 
-	entry, err := h.store.GetByID(id)
+	entry, err := h.store.Get(context.Background(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    404,
@@ -328,7 +342,7 @@ func (h *Handler) GetLog(c *gin.Context) {
 // GetStats 获取统计信息
 // GET /api/v1/stats
 func (h *Handler) GetStats(c *gin.Context) {
-	stats, err := h.store.GetStats()
+	stats, err := h.store.Stats(context.Background())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,

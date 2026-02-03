@@ -366,21 +366,20 @@
                 .then(data => {
                     if (data.code === 200) {
                         const m = data.data;
-                        // 使用 snake_case 字段名（标准 JSON API）
-                        document.getElementById('logsReceived').textContent = m.logs_received || 0;
-                        document.getElementById('logsStored').textContent = m.logs_stored || 0;
-                        document.getElementById('logsDropped').textContent = m.logs_dropped || 0;
-                        document.getElementById('requestsTotal').textContent = m.requests_total || 0;
-                        document.getElementById('requestsError').textContent = m.requests_error || 0;
-                        document.getElementById('badgerSize').innerHTML = formatBytes(m.badger_size || 0);
-                        document.getElementById('avgIngestLatency').innerHTML = formatDuration(m.avg_ingest_latency || 0);
-                        document.getElementById('avgQueryLatency').innerHTML = formatDuration(m.avg_query_latency || 0);
-                        document.getElementById('avgStorageLatency').innerHTML = formatDuration(m.avg_storage_latency || 0);
-                        document.getElementById('logsLast1Min').textContent = m.logs_last_1min || 0;
-                        document.getElementById('logsLast5Min').textContent = m.logs_last_5min || 0;
-                        document.getElementById('logsLast15Min').textContent = m.logs_last_15min || 0;
-                        document.getElementById('memoryUsage').innerHTML = formatBytes(m.memory_usage || 0);
-                        document.getElementById('cpuPercent').innerHTML = (m.cpu_percent || 0).toFixed(2);
+                        document.getElementById('logsReceived').textContent = m.logsReceived || 0;
+                        document.getElementById('logsStored').textContent = m.logsStored || 0;
+                        document.getElementById('logsDropped').textContent = m.logsDropped || 0;
+                        document.getElementById('requestsTotal').textContent = m.requestsTotal || 0;
+                        document.getElementById('requestsError').textContent = m.requestsError || 0;
+                        document.getElementById('badgerSize').innerHTML = formatBytes(m.badgerSize || 0);
+                        document.getElementById('avgIngestLatency').innerHTML = formatDuration(m.avgIngestLatency || 0);
+                        document.getElementById('avgQueryLatency').innerHTML = formatDuration(m.avgQueryLatency || 0);
+                        document.getElementById('avgStorageLatency').innerHTML = formatDuration(m.avgStorageLatency || 0);
+                        document.getElementById('logsLast1Min').textContent = m.logsLast1Min || 0;
+                        document.getElementById('logsLast5Min').textContent = m.logsLast5Min || 0;
+                        document.getElementById('logsLast15Min').textContent = m.logsLast15Min || 0;
+                        document.getElementById('memoryUsage').innerHTML = formatBytes(m.memoryUsage || 0);
+                        document.getElementById('cpuPercent').innerHTML = (m.cpuPercent || 0).toFixed(2);
                     }
                 })
                 .catch(err => {

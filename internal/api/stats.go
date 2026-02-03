@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -11,11 +12,11 @@ import (
 
 // StatsHandler 统计处理器
 type StatsHandler struct {
-	store *storage.BadgerStore
+	store storage.Store
 }
 
 // NewStatsHandler 创建统计处理器
-func NewStatsHandler(store *storage.BadgerStore) *StatsHandler {
+func NewStatsHandler(store storage.Store) *StatsHandler {
 	return &StatsHandler{store: store}
 }
 
@@ -55,15 +56,17 @@ func (h *StatsHandler) GetErrorStats(c *gin.Context) {
 	}
 
 	// 查询错误日志
-	params := storage.QueryParams{
-		Level:     "error",
-		Service:   service,
-		StartTime: startTime,
-		EndTime:   now,
-		Limit:     10000, // 获取足够多的日志用于统计
+	params := &storage.Query{
+		Levels: []string{"error"},
+		From:   startTime,
+		To:     now,
+		Limit:  10000, // 获取足够多的日志用于统计
+	}
+	if service != "" {
+		params.Services = []string{service}
 	}
 
-	logs, total, err := h.store.Query(params)
+	result, err := h.store.Query(context.Background(), params)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -72,6 +75,8 @@ func (h *StatsHandler) GetErrorStats(c *gin.Context) {
 		})
 		return
 	}
+	logs := result.Entries
+	total := result.Total
 
 	// 聚合统计
 	groups := make(map[string]*ErrorGroup)
@@ -123,7 +128,7 @@ func (h *StatsHandler) GetErrorStats(c *gin.Context) {
 	}
 
 	// 排序并取 Top N
-	result := sortAndTopN(groups, top, total)
+	errorGroups := sortAndTopN(groups, top, total)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    200,
@@ -132,7 +137,7 @@ func (h *StatsHandler) GetErrorStats(c *gin.Context) {
 			"time_range":   startTime.Format("2006-01-02 15:04:05") + " ~ " + now.Format("2006-01-02 15:04:05"),
 			"total_errors": total,
 			"group_by":     groupBy,
-			"groups":       result,
+			"groups":       errorGroups,
 		},
 	})
 }
@@ -222,15 +227,17 @@ func (h *StatsHandler) GetErrorTrend(c *gin.Context) {
 	}
 
 	// 查询错误日志
-	params := storage.QueryParams{
-		Level:     "error",
-		Service:   service,
-		StartTime: startTime,
-		EndTime:   now,
-		Limit:     50000,
+	params := &storage.Query{
+		Levels: []string{"error"},
+		From:   startTime,
+		To:     now,
+		Limit:  50000,
+	}
+	if service != "" {
+		params.Services = []string{service}
 	}
 
-	logs, _, err := h.store.Query(params)
+	result, err := h.store.Query(context.Background(), params)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -239,6 +246,7 @@ func (h *StatsHandler) GetErrorTrend(c *gin.Context) {
 		})
 		return
 	}
+	logs := result.Entries
 
 	// 按时间段聚合
 	buckets := make(map[string]int)

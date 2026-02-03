@@ -18,28 +18,35 @@ func NewNaturalQueryParser() *NaturalQueryParser {
 }
 
 // Parse 解析自然语言查询
-func (p *NaturalQueryParser) Parse(query string) storage.QueryParams {
-	params := storage.QueryParams{}
+func (p *NaturalQueryParser) Parse(query string) *storage.Query {
+	qry := &storage.Query{}
 	query = strings.TrimSpace(query)
 
 	// 解析时间范围
-	params.StartTime, params.EndTime = p.parseTimeRange(query)
+	qry.From, qry.To = p.parseTimeRange(query)
 
 	// 解析日志级别
-	params.Level = p.parseLevel(query)
+	if level := p.parseLevel(query); level != "" {
+		qry.Levels = []string{level}
+	}
 
 	// 解析服务名
-	params.Service = p.parseService(query)
+	if service := p.parseService(query); service != "" {
+		qry.Services = []string{service}
+	}
 
 	// 剩余部分作为关键词
 	keyword := p.extractKeyword(query)
 	// 如果关键词太短（小于2个字符），认为是噪音，忽略
 	// 如果关键词和服务名相同，也忽略
-	if len([]rune(keyword)) >= 2 && keyword != params.Service {
-		params.Keyword = keyword
+	if len([]rune(keyword)) >= 2 {
+		// 检查是否与服务名相同
+		if len(qry.Services) == 0 || keyword != qry.Services[0] {
+			qry.Keywords = []string{keyword}
+		}
 	}
 
-	return params
+	return qry
 }
 
 // parseTimeRange 解析时间范围

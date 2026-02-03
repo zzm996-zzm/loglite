@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -40,8 +41,12 @@ func main() {
 		log.Fatalf("创建数据目录失败: %v", err)
 	}
 
-	// 初始化存储
-	store, err := storage.NewBadgerStore(cfg.Storage.DataDir, cfg.Storage.Retention)
+	// 初始化存储（使用新的重构后的 API）
+	store, err := storage.New(
+		storage.WithContext(context.Background()),
+		storage.WithType("badger"),
+		storage.WithPath(cfg.Storage.DataDir),
+	)
 	if err != nil {
 		log.Fatalf("初始化存储失败: %v", err)
 	}

@@ -12,7 +12,7 @@ var globalMonitor *monitor.Monitor
 var globalHealthChecker *monitor.HealthChecker
 
 // SetupRouter 设置路由
-func SetupRouter(store *storage.BadgerStore) *gin.Engine {
+func SetupRouter(store storage.Store) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
 	r := gin.New()
@@ -65,7 +65,7 @@ func SetupRouter(store *storage.BadgerStore) *gin.Engine {
 				"data":    metrics,
 			})
 		})
-		
+
 		// 健康检查（API v1 版本）
 		v1.GET("/health", func(c *gin.Context) {
 			health := monitorHandler.GetHealth()

@@ -3,15 +3,16 @@ module github.com/loglite/loglite
 go 1.21
 
 require (
+	github.com/bytedance/sonic v1.9.1
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/google/uuid v1.5.0
+	gopkg.in/yaml.v2 v2.2.8
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.31.1
 )
 
 require (
-	github.com/bytedance/sonic v1.9.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
 	github.com/dgraph-io/ristretto v0.1.1 // indirect

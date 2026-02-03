@@ -44,7 +44,8 @@ func main() {
 func demoMonitor() {
 	fmt.Println("【1】监控系统")
 
-	mon := monitor.NewMonitor()
+	// 传入 nil 作为演示（实际使用时传入真实的 store）
+	mon := monitor.NewMonitor(nil)
 
 	mon.IncrLogReceived(100)
 	mon.IncrLogStored(98)
@@ -57,7 +58,7 @@ func demoMonitor() {
 	fmt.Printf("  平均接收延迟: %v\n", metrics.AvgIngestLatency)
 	fmt.Printf("  平均查询延迟: %v\n", metrics.AvgQueryLatency)
 
-	checker := monitor.NewHealthChecker()
+	checker := monitor.NewHealthChecker(nil)
 	health := checker.Check()
 	fmt.Printf("  健康状态: %s\n", health.Status)
 	fmt.Printf("  运行时间: %v\n", health.Uptime)
