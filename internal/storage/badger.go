@@ -532,62 +532,21 @@ func (s *BadgerStore) Get(ctx context.Context, id string) (*model.LogEntry, erro
 	defer s.mu.RUnlock()
 
 	err := s.db.View(func(txn *badger.Txn) error {
-		// 方案1：通过ID索引查找（O(1) 时间复杂度，空间换时间）
-		// 索引：id|{uuid} -> t|timestamp|s|service|l|level|id|{uuid}
-		idKey := s.buildIDKey(id)
-		item, err := txn.Get(idKey)
-		if err == nil {
-			// 找到索引，获取实际的key
-			var actualKey []byte
-			err := item.Value(func(val []byte) error {
-				actualKey = make([]byte, len(val))
-				copy(actualKey, val)
-				return nil
-			})
-			if err == nil {
-				// 使用实际的key获取日志条目
-				item, err := txn.Get(actualKey)
-				if err == nil {
-					return item.Value(func(val []byte) error {
-						return sonic.Unmarshal(val, &entry)
-					})
-				}
-			}
+		// 使用公共函数查找key
+		actualKey, err := s.findKeyByID(txn, id)
+		if err != nil {
+			return err
 		}
 
-		// 方案2：如果索引不存在（向后兼容），通过扫描key查找
-		// 优化：只解析key，不读取value，性能比原来的全表扫描好
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false // 不预取value，只扫描key
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		for it.Rewind(); it.Valid(); it.Next() {
-			key := it.Item().Key()
-
-			// 跳过索引key
-			// 注意：BadgerDB 是单数据库存储，索引和数据都在同一个数据库中
-			// 不像 MySQL 那样有多个表文件，而是通过 key 前缀来区分：
-			// - "id|{uuid}" 开头的 key 是索引数据
-			// - "t|timestamp|..." 开头的 key 是实际日志数据
-			// 在扫描时需要跳过索引 key，只处理实际数据 key
-			if bytes.HasPrefix(key, []byte("id|")) {
-				it.Next()
-				continue
-			}
-
-			// 解析key中的ID（只处理数据key，格式：t|timestamp|s|service|l|level|id|{uuid}）
-			_, _, _, keyID := s.parseKey(key)
-			if keyID == id {
-				// 找到匹配的key，读取value
-				item := it.Item()
-				return item.Value(func(val []byte) error {
-					return sonic.Unmarshal(val, &entry)
-				})
-			}
+		// 使用实际的key获取日志条目
+		item, err := txn.Get(actualKey)
+		if err != nil {
+			return err
 		}
 
-		return fmt.Errorf("entry not found: %s", id)
+		return item.Value(func(val []byte) error {
+			return sonic.Unmarshal(val, &entry)
+		})
 	})
 
 	if err != nil {
@@ -645,6 +604,195 @@ func (s *BadgerStore) Health(ctx context.Context) error {
 		// 执行一个空操作来检查连接
 		return nil
 	})
+}
+
+// Delete 通过ID删除单条记录
+func (s *BadgerStore) Delete(ctx context.Context, id string) error {
+	// 检查上下文
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return fmt.Errorf("store is closed")
+	}
+
+	// 先查找实际的 key
+	var actualKey []byte
+	err := s.db.View(func(txn *badger.Txn) error {
+		var err error
+		actualKey, err = s.findKeyByID(txn, id)
+		return err
+	})
+
+	if err != nil {
+		return err
+	}
+
+	// 删除主数据和索引
+	err = s.db.Update(func(txn *badger.Txn) error {
+		// 删除主数据
+		if err := txn.Delete(actualKey); err != nil {
+			return fmt.Errorf("delete main data: %w", err)
+		}
+
+		// 删除ID索引
+		idKey := s.buildIDKey(id)
+		if err := txn.Delete(idKey); err != nil && err != badger.ErrKeyNotFound {
+			return fmt.Errorf("delete index: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	// 从缓存中删除
+	s.cache.Delete(id)
+
+	// 更新统计
+	s.stats.TotalLogs--
+	if s.stats.TotalLogs < 0 {
+		s.stats.TotalLogs = 0
+	}
+
+	return nil
+}
+
+// DeleteMany 批量删除
+func (s *BadgerStore) DeleteMany(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// 检查上下文
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return fmt.Errorf("store is closed")
+	}
+
+	// 先查找所有实际的 key
+	type keyPair struct {
+		actualKey []byte
+		idKey     []byte
+	}
+	keysToDelete := make([]keyPair, 0, len(ids))
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		for _, id := range ids {
+			actualKey, err := s.findKeyByID(txn, id)
+			if err != nil {
+				// 如果某个ID找不到，跳过（允许部分删除）
+				continue
+			}
+
+			keysToDelete = append(keysToDelete, keyPair{
+				actualKey: actualKey,
+				idKey:     s.buildIDKey(id),
+			})
+		}
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("find keys to delete: %w", err)
+	}
+
+	if len(keysToDelete) == 0 {
+		return nil
+	}
+
+	// 使用 WriteBatch 批量删除
+	wb := s.db.NewWriteBatch()
+	defer wb.Cancel()
+
+	for _, pair := range keysToDelete {
+		// 删除主数据
+		if err := wb.Delete(pair.actualKey); err != nil {
+			return fmt.Errorf("batch delete main data: %w", err)
+		}
+
+		// 删除ID索引
+		if err := wb.Delete(pair.idKey); err != nil && err != badger.ErrKeyNotFound {
+			return fmt.Errorf("batch delete index: %w", err)
+		}
+	}
+
+	if err := wb.Flush(); err != nil {
+		return fmt.Errorf("flush batch delete: %w", err)
+	}
+
+	// 从缓存中删除
+	for _, id := range ids {
+		s.cache.Delete(id)
+	}
+
+	// 更新统计
+	deletedCount := int64(len(keysToDelete))
+	s.stats.TotalLogs -= deletedCount
+	if s.stats.TotalLogs < 0 {
+		s.stats.TotalLogs = 0
+	}
+
+	return nil
+}
+
+// findKeyByID 通过ID查找实际的key（公共函数，供Get、Delete等使用）
+// 返回实际的key和是否找到
+func (s *BadgerStore) findKeyByID(txn *badger.Txn, id string) ([]byte, error) {
+	// 方案1：通过ID索引查找（O(1) 时间复杂度，空间换时间）
+	idKey := s.buildIDKey(id)
+	item, err := txn.Get(idKey)
+	if err == nil {
+		// 找到索引，获取实际的key
+		var actualKey []byte
+		err := item.Value(func(val []byte) error {
+			actualKey = make([]byte, len(val))
+			copy(actualKey, val)
+			return nil
+		})
+		if err == nil && len(actualKey) > 0 {
+			return actualKey, nil
+		}
+	}
+
+	// 方案2：如果索引不存在（向后兼容），通过扫描key查找
+	// 优化：只解析key，不读取value，性能比原来的全表扫描好
+	opts := badger.DefaultIteratorOptions
+	opts.PrefetchValues = false // 不预取value，只扫描key
+	it := txn.NewIterator(opts)
+	defer it.Close()
+
+	for it.Rewind(); it.Valid(); it.Next() {
+		key := it.Item().Key()
+
+		// 跳过索引key
+		if bytes.HasPrefix(key, []byte("id|")) {
+			continue
+		}
+
+		// 解析key中的ID（只处理数据key，格式：t|timestamp|s|service|l|level|id|{uuid}）
+		_, _, _, keyID := s.parseKey(key)
+		if keyID == id {
+			// 找到匹配的key
+			actualKey := make([]byte, len(key))
+			copy(actualKey, key)
+			return actualKey, nil
+		}
+	}
+
+	return nil, fmt.Errorf("entry not found: %s", id)
 }
 
 // startBackgroundTasks 启动后台任务

@@ -92,6 +92,10 @@ type Store interface {
 	// 清理操作（按时间）
 	Cleanup(ctx context.Context, before time.Time) (int64, error)
 
+	// 清理数据
+	Delete(ctx context.Context, id string) error
+	DeleteMany(ctx context.Context, ids []string) error
+
 	// 健康检查
 	Health(ctx context.Context) error
 }
